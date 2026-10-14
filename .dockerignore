@@ -1,0 +1,16 @@
+.git
+.local
+tmp
+.env
+.env.*
+node_modules
+dist
+test-results
+playwright-report
+coverage
+bin
+*.session
+*.pem
+*.key
+*.dump
+*.backup
