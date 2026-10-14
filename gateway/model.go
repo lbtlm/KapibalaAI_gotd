@@ -15,16 +15,33 @@ type account struct {
 	RetrySeconds int       `json:"retrySeconds"`
 }
 type group struct {
-	Owner         string            `json:"owner"`
-	Members       map[string]bool   `json:"members"`
-	Admins        map[string]bool   `json:"admins"`
-	Invite        string            `json:"invite"`
-	InviteReady   time.Time         `json:"inviteReady"`
-	InviteExpired bool              `json:"inviteExpired"`
-	Writable      bool              `json:"writable"`
-	ChannelID     int64             `json:"channelId"`
-	AccessHashes  map[string]int64  `json:"accessHashes"`
-	MemberRoles   map[string]string `json:"memberRoles"`
+	Owner          string            `json:"owner"`
+	Members        map[string]bool   `json:"members"`
+	Admins         map[string]bool   `json:"admins"`
+	Invite         string            `json:"invite"`
+	InviteReady    time.Time         `json:"inviteReady"`
+	InviteExpired  bool              `json:"inviteExpired"`
+	Writable       bool              `json:"writable"`
+	ChannelID      int64             `json:"channelId"`
+	AccessHashes   map[string]int64  `json:"accessHashes"`
+	MemberRoles    map[string]string `json:"memberRoles"`
+	HistoryThrough map[string]int    `json:"historyThrough"`
+	Recovery       *HistoryRecovery  `json:"recovery,omitempty"`
+}
+
+// HistoryRecovery describes a proven channel-ID range and any visible limitations.
+type HistoryRecovery struct {
+	AccountID                   string    `json:"accountId"`
+	Status                      string    `json:"status"`
+	FromID                      int       `json:"fromId"`
+	ThroughID                   int       `json:"throughId"`
+	TargetID                    int       `json:"targetId"`
+	RecoveredMessages           int       `json:"recoveredMessages"`
+	UnavailableIDs              []int     `json:"unavailableIds,omitempty"`
+	MembershipSnapshotConfirmed bool      `json:"membershipSnapshotConfirmed"`
+	MembershipHistoryComplete   bool      `json:"membershipHistoryComplete"`
+	Code                        string    `json:"code,omitempty"`
+	UpdatedAt                   time.Time `json:"updatedAt"`
 }
 type message struct {
 	GroupID  string    `json:"groupId"`
@@ -44,6 +61,7 @@ type job struct {
 	Text       string         `json:"text"`
 	Code       string         `json:"code"`
 	Data       map[string]any `json:"data,omitempty"`
+	EffectID   string         `json:"effectId,omitempty"`
 }
 
 // Fault controls one explicitly enabled fake failure, optionally scoped.
@@ -72,6 +90,9 @@ type effect struct {
 	State     string    `json:"state"`
 	MsgID     string    `json:"msgId"`
 	SentAt    time.Time `json:"sentAt"`
+	TargetID  string    `json:"targetId,omitempty"`
+	Code      string    `json:"code,omitempty"`
+	Status    int       `json:"status,omitempty"`
 }
 type state struct {
 	Mode        string              `json:"mode"`

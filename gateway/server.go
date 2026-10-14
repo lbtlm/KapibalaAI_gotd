@@ -109,6 +109,7 @@ func New(parent context.Context, c Config) (*Service, error) {
 	s.mux.HandleFunc("POST /groups/import", s.importHTTP)
 	s.mux.HandleFunc("POST /groups/{groupId}/{operation}", s.groupHTTP)
 	s.mux.HandleFunc("GET /groups/{groupId}/members", s.groupHTTP)
+	s.mux.HandleFunc("GET /groups/{groupId}/recovery", s.recoveryHTTP)
 	s.mux.HandleFunc("GET /groups/{groupId}/messages/by-client-id/{clientMsgId}", s.queryHTTP)
 	s.mux.HandleFunc("GET /events", s.eventsHTTP)
 	s.mux.HandleFunc("GET /media/{id}", func(w http.ResponseWriter, r *http.Request) { fail(w, &APIError{404, "MEDIA_EXPIRED", 0}) })
@@ -117,8 +118,14 @@ func New(parent context.Context, c Config) (*Service, error) {
 	}
 	s.wg.Add(1)
 	go s.runJobs()
-	if a, ok := c.Telegram.(*TelegramAdapter); ok {
-		a.resumeOnline(s)
+	if a, ok := c.Telegram.(interface{ Resume(*Service) }); ok {
+		a.Resume(s)
+	}
+	if a, ok := c.Telegram.(interface {
+		RecoverEffects(context.Context, string) error
+	}); ok {
+		s.wg.Add(1)
+		go s.runSendRecovery(a)
 	}
 	if checker, ok := c.Store.(interface{ CheckLease(context.Context) error }); ok {
 		s.wg.Add(1)
@@ -143,6 +150,27 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Done closes on shutdown or a lost PostgreSQL writer lease.
 func (s *Service) Done() <-chan struct{} { return s.ctx.Done() }
+
+// operationContext checks ownership after queueing and binds an RPC to service life.
+func (s *Service) operationContext(parent context.Context) (context.Context, func(), error) {
+	if s.ctx.Err() != nil {
+		return nil, func() {}, ErrWriterLeaseLost
+	}
+	if checker, ok := s.store.(interface{ CheckLease(context.Context) error }); ok {
+		if err := checker.CheckLease(parent); err != nil {
+			s.cancel()
+			return nil, func() {}, err
+		}
+	}
+	ctx, cancel := context.WithCancel(parent)
+	stop := context.AfterFunc(s.ctx, cancel)
+	if s.ctx.Err() != nil {
+		cancel()
+		stop()
+		return nil, func() {}, ErrWriterLeaseLost
+	}
+	return ctx, func() { stop(); cancel() }, nil
+}
 func (s *Service) watchLease(checker interface{ CheckLease(context.Context) error }) {
 	defer s.wg.Done()
 	tick := time.NewTicker(250 * time.Millisecond)

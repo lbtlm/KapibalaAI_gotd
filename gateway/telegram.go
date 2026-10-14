@@ -28,13 +28,14 @@ type onlineSession struct {
 
 // TelegramAdapter owns one gotd Run/update manager per configured account.
 type TelegramAdapter struct {
-	mu       sync.Mutex
-	ctx      context.Context
-	cancel   context.CancelFunc
-	db       *sql.DB
-	configs  map[string]AccountConfig
-	sessions map[string]*onlineSession
-	service  *Service
+	mu         sync.Mutex
+	ctx        context.Context
+	cancel     context.CancelFunc
+	db         *sql.DB
+	configs    map[string]AccountConfig
+	sessions   map[string]*onlineSession
+	service    *Service
+	recovering map[string]bool
 }
 
 // NewTelegramAdapter validates configuration without opening or connecting sessions.
@@ -75,7 +76,8 @@ func (a *TelegramAdapter) Bind(s *Service) {
 	}
 }
 
-func (a *TelegramAdapter) resumeOnline(s *Service) {
+// Resume reconnects persisted online aliases and resumes their existing send intents.
+func (a *TelegramAdapter) Resume(s *Service) {
 	for id, acct := range s.state.Accounts {
 		if acct.Status != "online" {
 			continue
@@ -86,9 +88,9 @@ func (a *TelegramAdapter) resumeOnline(s *Service) {
 			defer s.wg.Done()
 			pid, err := a.Connect(s.ctx, id)
 			s.mu.Lock()
-			defer s.mu.Unlock()
 			acct := s.state.Accounts[id]
 			if acct == nil {
+				s.mu.Unlock()
 				return
 			}
 			if err == nil {
@@ -105,6 +107,10 @@ func (a *TelegramAdapter) resumeOnline(s *Service) {
 				}
 			}
 			_ = s.save(context.Background())
+			s.mu.Unlock()
+			if err == nil {
+				_ = a.RecoverEffects(s.ctx, id)
+			}
 		}()
 	}
 }
@@ -132,20 +138,12 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (string, error
 	} else if err != nil {
 		return "", err
 	}
-	us := updateStorage{a.db, id}
-	handler := telegram.UpdateHandlerFunc(func(ctx context.Context, u tg.UpdatesClass) error {
-		if a.service == nil {
-			return nil
-		}
-		a.service.mu.Lock()
-		defer a.service.mu.Unlock()
-		a.handleUpdates(id, u)
-		return a.service.save(ctx)
-	})
-	manager := updates.New(updates.Config{Handler: handler, Storage: us, AccessHasher: us})
-	client := telegram.NewClient(c.APIID, c.APIHash, telegram.Options{SessionStorage: storage, UpdateHandler: manager, MigrationTimeout: 120 * time.Second, Device: telegram.DeviceConfig{DeviceModel: c.DeviceModel, SystemVersion: c.SystemVersion, AppVersion: c.AppVersion, LangCode: "en", SystemLangCode: "en-US"}})
 	runCtx, cancel := context.WithCancel(a.ctx)
-	s := &onlineSession{client: client, api: tg.NewClient(client), cancel: cancel, done: make(chan struct{})}
+	var manager *updates.Manager
+	client := telegram.NewClient(c.APIID, c.APIHash, telegram.Options{SessionStorage: storage, UpdateHandler: telegram.UpdateHandlerFunc(func(ctx context.Context, u tg.UpdatesClass) error { return manager.Handle(ctx, u) }), MigrationTimeout: 120 * time.Second, Device: telegram.DeviceConfig{DeviceModel: c.DeviceModel, SystemVersion: c.SystemVersion, AppVersion: c.AppVersion, LangCode: "en", SystemLangCode: "en-US"}})
+	s := &onlineSession{client: client, api: a.fencedClient(tg.NewClient(client)), cancel: cancel, done: make(chan struct{})}
+	pipeline := a.Updates(id, s.api, cancel)
+	manager = updates.New(updates.Config{Handler: pipeline.Handler, Storage: pipeline.Storage, AccessHasher: pipeline.AccessHasher, OnChannelTooLong: pipeline.OnChannelTooLong})
 	ready := make(chan error, 1)
 	go func() {
 		defer close(s.done)
@@ -156,11 +154,14 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (string, error
 			}
 			s.self = self
 			ready <- nil
-			return manager.Run(live, s.api, self.ID, updates.AuthOptions{IsBot: self.Bot})
+			return manager.Run(live, pipeline.API, self.ID, updates.AuthOptions{IsBot: self.Bot})
 		})
 		select {
 		case ready <- err:
 		default:
+		}
+		if failure := pipeline.gate.err(); failure != nil {
+			err = failure
 		}
 		if err != nil && !errors.Is(err, context.Canceled) {
 			slog.Warn("Telegram connection ended", "accountId", id, "code", platformError(err).Error())

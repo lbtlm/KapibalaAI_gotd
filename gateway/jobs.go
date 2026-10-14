@@ -66,6 +66,9 @@ func (s *Service) processJobs() {
 				delete(g.Members, j.PlatformID)
 				remaining = append(remaining, job{Kind: "member_left", Due: now.Add(50 * time.Millisecond), GroupID: j.GroupID, PlatformID: j.PlatformID})
 			}
+			if e := s.state.Effects[j.EffectID]; e != nil {
+				e.State = "completed"
+			}
 		case "member_joined", "member_left":
 			s.emit(j.Kind, map[string]any{"groupId": j.GroupID, "platformUserId": j.PlatformID})
 		case "send":

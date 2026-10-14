@@ -380,6 +380,11 @@ func (a *TelegramAdapter) members(ctx context.Context, aid, gid string, g *group
 	if err != nil {
 		return nil, err
 	}
+	return a.applyMembers(gid, g, s, ps, events), nil
+}
+
+// applyMembers shares the snapshot/event merge while its caller holds Service.mu.
+func (a *TelegramAdapter) applyMembers(gid string, g *group, s *Service, ps []tg.ChannelParticipantClass, events bool) []map[string]string {
 	members := map[string]bool{}
 	roles := map[string]string{}
 	out := make([]map[string]string, 0, len(ps))
@@ -406,7 +411,7 @@ func (a *TelegramAdapter) members(ctx context.Context, aid, gid string, g *group
 	g.Members = members
 	g.MemberRoles = roles
 	sort.Slice(out, func(i, j int) bool { return out[i]["platformUserId"] < out[j]["platformUserId"] })
-	return out, nil
+	return out
 }
 func (a *TelegramAdapter) participantUser(ctx context.Context, ch *tg.InputChannel, live *onlineSession, pid string) (*tg.InputUser, error) {
 	_, users, e := a.participants(ctx, ch, live)

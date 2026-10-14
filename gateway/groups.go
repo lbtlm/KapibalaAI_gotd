@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"sort"
 	"time"
@@ -9,7 +11,7 @@ import (
 func (s *Service) groupHTTP(w http.ResponseWriter, r *http.Request) {
 	var in input
 	if r.Method == "POST" {
-		if err := decode(r, &in); err != nil {
+		if err := decode(r, &in); err != nil && !(r.PathValue("operation") == "invite" && errors.Is(err, io.EOF)) {
 			fail(w, &APIError{400, "INVALID_INPUT", 0})
 			return
 		}
@@ -23,12 +25,28 @@ func (s *Service) groupHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	opCtx, stop, err := s.operationContext(r.Context())
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	defer stop()
 	aid := in.AccountID
 	if in.ByAccountID != "" {
 		aid = in.ByAccountID
 	}
 	if op == "create" {
 		aid = in.CreatorAccountID
+	}
+	if op == "kick" {
+		if handled, result, e := s.lookupKickKey(gid, aid, in); handled {
+			if e != nil {
+				fail(w, e)
+			} else {
+				respond(w, 200, result)
+			}
+			return
+		}
 	}
 	if op != "members" && op != "invite" {
 		if err := s.accountError(aid, true); err != nil {
@@ -53,7 +71,16 @@ func (s *Service) groupHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.cfg.Telegram != nil {
-		out, err := s.cfg.Telegram.Execute(r.Context(), op, gid, in, s)
+		if op == "kick" {
+			if e := s.prepareKick(opCtx, gid, aid, in); e != nil {
+				fail(w, e)
+				return
+			}
+		}
+		out, err := s.cfg.Telegram.Execute(opCtx, op, gid, in, s)
+		if op == "kick" {
+			s.finishKick(in.IdempotencyKey, err)
+		}
 		status := 200
 		if op == "join" || op == "send" {
 			status = 202
@@ -157,9 +184,13 @@ func (s *Service) groupHTTP(w http.ResponseWriter, r *http.Request) {
 			fail(w, &APIError{400, "INVALID_INPUT", 0})
 			return
 		}
+		if e := s.prepareKick(opCtx, gid, aid, in); e != nil {
+			fail(w, e)
+			return
+		}
 		if f != nil && f.Code == "NETWORK_TIMEOUT" {
 			if f.Effect {
-				s.state.Jobs = append(s.state.Jobs, job{Kind: "kick", Due: now.Add(settleDelay(f)), GroupID: gid, PlatformID: in.TargetID})
+				s.state.Jobs = append(s.state.Jobs, job{Kind: "kick", Due: now.Add(settleDelay(f)), GroupID: gid, PlatformID: in.TargetID, EffectID: "kick:" + in.IdempotencyKey})
 			}
 			s.commitHTTP(w, r, 0, nil, faultError(f))
 			return
@@ -168,6 +199,7 @@ func (s *Service) groupHTTP(w http.ResponseWriter, r *http.Request) {
 			delete(g.Members, in.TargetID)
 			s.state.Jobs = append(s.state.Jobs, job{Kind: "member_left", Due: now.Add(100 * time.Millisecond), GroupID: gid, PlatformID: in.TargetID})
 		}
+		s.finishKick(in.IdempotencyKey, nil)
 		s.commitHTTP(w, r, 200, map[string]bool{"kicked": true}, nil)
 	case "leave":
 		pid := s.state.Accounts[aid].PlatformID

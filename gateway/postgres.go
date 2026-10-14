@@ -94,6 +94,9 @@ func (p *PostgresStore) Save(ctx context.Context, b []byte) error {
 func (p *PostgresStore) CheckLease(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	return p.checkLeaseLocked(ctx)
+}
+func (p *PostgresStore) checkLeaseLocked(ctx context.Context) error {
 	if p.lost {
 		return ErrWriterLeaseLost
 	}
@@ -104,6 +107,21 @@ func (p *PostgresStore) CheckLease(ctx context.Context) error {
 		return ErrWriterLeaseLost
 	}
 	return nil
+}
+
+// ExecFenced writes SDK state on the same session that owns the gateway lease.
+func (p *PostgresStore) ExecFenced(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if e := p.checkLeaseLocked(ctx); e != nil {
+		return nil, e
+	}
+	result, e := p.lease.ExecContext(ctx, query, args...)
+	if e != nil {
+		p.lost = true
+		return nil, fmt.Errorf("%w: %v", ErrWriterLeaseLost, e)
+	}
+	return result, nil
 }
 func (p *PostgresStore) Close() error {
 	if p.lease != nil {
