@@ -1,0 +1,57 @@
+name: Prepare accepted candidate
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful CI push run ID on dev or main
+        required: true
+      accepted_sha:
+        description: Exact 40-character SHA functionally accepted by the maintainer
+        required: true
+      purpose:
+        description: Manual operator action after download
+        type: choice
+        options: [deploy, rollback]
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  prepare:
+    name: Verify immutable candidate for manual operation
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ inputs.run_id }}
+      ACCEPTED_SHA: ${{ inputs.accepted_sha }}
+      PURPOSE: ${{ inputs.purpose }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require current successful CI evidence for the exact SHA
+        run: |
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$ACCEPTED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" > run.json
+          python3 - <<'PY'
+          import json, os
+          r = json.load(open('run.json'))
+          assert r['name'] == 'CI' and r['path'] == '.github/workflows/ci.yml'
+          assert r['status'] == 'completed' and r['conclusion'] == 'success'
+          assert r['event'] == 'push' and r['head_branch'] in ('dev', 'main')
+          assert r['head_sha'] == os.environ['ACCEPTED_SHA']
+          with open(os.environ['GITHUB_ENV'], 'a') as f:
+            f.write('CANDIDATE_NAME=candidate-' + r['head_sha'] + '-' + str(r['run_attempt']) + '\n')
+          PY
+      - name: Download the original candidate; never rebuild
+        run: |
+          gh run download "$RUN_ID" --name "$CANDIDATE_NAME" --dir candidate
+          cd candidate
+          sha256sum --check SHA256SUMS
+          test "$(cat COMMIT_SHA)" = "$ACCEPTED_SHA"
+          printf 'Verified CI run: %s\nAccepted commit: %s\nOperator purpose: %s\nNo deployment performed by this workflow.\n' "$RUN_ID" "$ACCEPTED_SHA" "$PURPOSE" > PROMOTION.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: accepted-${{ inputs.accepted_sha }}-${{ inputs.purpose }}-${{ github.run_id }}
+          path: candidate/
+          if-no-files-found: error
+          retention-days: 14
