@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lbtlm/KapibalaAI_gotd/backend/internal/migration"
 	"net/http"
@@ -28,6 +29,9 @@ type App struct {
 	alertMu sync.Mutex
 	alerts  []alert
 	scope   string
+	sendMu  sync.Mutex
+	sending map[string]bool
+	runtime *pgx.Conn
 }
 
 func ID() string { var b [16]byte; rand.Read(b[:]); return hex.EncodeToString(b[:]) }
@@ -59,7 +63,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		p.Close()
 		return nil, e
 	}
-	return &App{pool: p, cfg: cfg, schema: v, client: &http.Client{Timeout: 12 * time.Second}, scope: scope}, nil
+	return &App{pool: p, cfg: cfg, schema: v, client: &http.Client{Timeout: 12 * time.Second}, scope: scope, sending: map[string]bool{}}, nil
 }
 func (a *App) Close() {
 	if a.cancel != nil {
@@ -68,11 +72,14 @@ func (a *App) Close() {
 	a.wg.Wait()
 	a.pool.Close()
 }
-func (a *App) Start(ctx context.Context) {
+func (a *App) Start(ctx context.Context) error {
 	ctx, a.cancel = context.WithCancel(ctx)
-	a.recoverSequences(ctx)
-	a.recoverAgentBudgets(ctx)
-	a.wg.Add(7)
+	if e := a.startRuntime(ctx); e != nil {
+		a.cancel()
+		return e
+	}
+	a.wg.Add(8)
+	go a.watchRuntime(ctx)
 	go a.eventsStream(ctx)
 	go a.loop(ctx, 100*time.Millisecond, a.inboxTick)
 	go a.loop(ctx, 100*time.Millisecond, a.sendTick)
@@ -80,6 +87,7 @@ func (a *App) Start(ctx context.Context) {
 	go a.loop(ctx, 100*time.Millisecond, a.agentTick)
 	go a.loop(ctx, 100*time.Millisecond, a.agentBudgetTick)
 	go a.loop(ctx, 100*time.Millisecond, func(ctx context.Context) { a.jobsTick(ctx); a.disconnectActions(ctx); a.flushAlerts(ctx) })
+	return nil
 }
 
 type apiError struct {

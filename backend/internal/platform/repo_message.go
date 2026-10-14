@@ -159,9 +159,21 @@ func (a *App) messages(w http.ResponseWriter, r *http.Request) error {
 }
 func (a *App) sendTick(ctx context.Context) {
 	for _, id := range a.ids(ctx, `SELECT id FROM accounts WHERE status IN ('online','rate_limited') UNION SELECT DISTINCT account_id FROM messages WHERE delivery_status IN ('dispatching','unknown')`) {
-		if e := a.lock(ctx, "send:"+id, func(ctx context.Context) error { return a.sendOne(ctx, id) }); e != nil && ctx.Err() == nil {
-			slog.Warn("send worker retrying", "accountId", id, "error", e)
+		a.sendMu.Lock()
+		if a.sending[id] {
+			a.sendMu.Unlock()
+			continue
 		}
+		a.sending[id] = true
+		a.sendMu.Unlock()
+		a.wg.Add(1)
+		go func(id string) {
+			defer a.wg.Done()
+			defer func() { a.sendMu.Lock(); delete(a.sending, id); a.sendMu.Unlock() }()
+			if e := a.lock(ctx, "send:"+id, func(ctx context.Context) error { return a.sendOne(ctx, id) }); e != nil && ctx.Err() == nil {
+				slog.Warn("send worker retrying", "accountId", id, "error", e)
+			}
+		}(id)
 	}
 }
 func (a *App) sendOne(ctx context.Context, account string) error {

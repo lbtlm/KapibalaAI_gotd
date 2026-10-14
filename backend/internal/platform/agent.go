@@ -388,6 +388,21 @@ func (a *App) executeAgent(ctx context.Context, id string) error {
 					return e
 				}
 			}
+			if b.Name == "kick_user" {
+				var existing bool
+				if e = a.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_effects WHERE run_id=$1 AND key=$2 AND kind='kick')`, r.ID, "kick:"+b.ID).Scan(&existing); e != nil {
+					return e
+				}
+				if existing {
+					// The durable intent proves this original step already passed
+					// policy and audit. Recover it before evaluating policy for new tools.
+					result, code, e = a.agentKick(ctx, &r, b, input)
+					if e != nil {
+						return e
+					}
+					cached = true
+				}
+			}
 			if !cached && (b.Name == "send_message" || b.Name == "kick_user") {
 				if b.Name == "kick_user" {
 					var allowed bool
@@ -614,9 +629,8 @@ func (a *App) agentSend(ctx context.Context, r *agentRun, input map[string]any) 
 func (a *App) agentKick(ctx context.Context, r *agentRun, b domain.Block, input map[string]any) (map[string]any, string, error) {
 	key := "kick:" + b.ID
 	var state string
-	var result json.RawMessage
-	var started time.Time
-	e := a.pool.QueryRow(ctx, `SELECT state,result,started_at FROM agent_effects WHERE run_id=$1 AND key=$2`, r.ID, key).Scan(&state, &result, &started)
+	var result, intentJSON json.RawMessage
+	e := a.pool.QueryRow(ctx, `SELECT state,result,input FROM agent_effects WHERE run_id=$1 AND key=$2`, r.ID, key).Scan(&state, &result, &intentJSON)
 	if e == nil && state == "done" {
 		var out map[string]any
 		json.Unmarshal(result, &out)
@@ -629,62 +643,31 @@ func (a *App) agentKick(ctx context.Context, r *agentRun, b domain.Block, input 
 	if e != nil {
 		return nil, "", e
 	}
-	target := input["platform_user_id"].(string)
-	if state != "" {
-		var members []struct {
-			PlatformUserID string `json:"platformUserId"`
-		}
-		for {
-			e = a.gateway(ctx, "GET", "/groups/"+*g.GatewayGroupID+"/members", nil, &members)
-			if e != nil {
-				select {
-				case <-ctx.Done():
-					return nil, "", ctx.Err()
-				case <-time.After(100 * time.Millisecond):
-				}
-				continue
-			}
-			present := false
-			for _, m := range members {
-				if m.PlatformUserID == target {
-					present = true
-				}
-			}
-			if !present {
-				out := map[string]any{"kicked": true}
-				_, e = a.pool.Exec(ctx, `UPDATE agent_effects SET state='done',result=$3 WHERE run_id=$1 AND key=$2`, r.ID, key, out)
-				return out, "", e
-			}
-			if time.Since(started) >= 14*time.Second {
-				break
-			}
-			select {
-			case <-ctx.Done():
-				return nil, "", ctx.Err()
-			case <-time.After(100 * time.Millisecond):
-			}
-		}
-	}
-	var account string
-	e = a.pool.QueryRow(ctx, `SELECT a.id FROM accounts a JOIN members m ON m.account_id=a.id WHERE m.group_id=$1 AND a.status='online' AND m.role IN ('creator','admin') ORDER BY CASE WHEN m.role='admin' THEN 0 ELSE 1 END,a.id LIMIT 1`, r.GroupID).Scan(&account)
-	if e == pgx.ErrNoRows {
-		return toolError("NO_AVAILABLE_ACCOUNT"), "NO_AVAILABLE_ACCOUNT", nil
-	}
-	if e != nil {
-		return nil, "", e
+	var intent struct {
+		ByAccountID string `json:"byAccountId"`
+		Target      string `json:"targetPlatformUserId"`
+		Key         string `json:"idempotencyKey"`
 	}
 	if state == "" {
+		e = a.pool.QueryRow(ctx, `SELECT a.id FROM accounts a JOIN members m ON m.account_id=a.id WHERE m.group_id=$1 AND a.status='online' AND m.role IN ('creator','admin') ORDER BY CASE WHEN m.role='admin' THEN 0 ELSE 1 END,a.id LIMIT 1`, r.GroupID).Scan(&intent.ByAccountID)
+		if e == pgx.ErrNoRows {
+			return toolError("NO_AVAILABLE_ACCOUNT"), "NO_AVAILABLE_ACCOUNT", nil
+		}
+		if e != nil {
+			return nil, "", e
+		}
+		intent.Target = input["platform_user_id"].(string)
+		intent.Key = r.ID + ":" + b.ID
 		tx, e := a.pool.Begin(ctx)
 		if e != nil {
 			return nil, "", e
 		}
+		defer tx.Rollback(ctx)
 		if e = agentFence(ctx, tx, r); e != nil {
-			tx.Rollback(ctx)
 			return nil, "", e
 		}
-		tag, e := tx.Exec(ctx, `INSERT INTO agent_effects(run_id,key,kind,state,input) VALUES($1,$2,'kick','inflight',$3) ON CONFLICT DO NOTHING`, r.ID, key, input)
+		tag, e := tx.Exec(ctx, `INSERT INTO agent_effects(run_id,key,kind,state,input) VALUES($1,$2,'kick','inflight',$3) ON CONFLICT DO NOTHING`, r.ID, key, intent)
 		if e != nil {
-			tx.Rollback(ctx)
 			return nil, "", e
 		}
 		if e = tx.Commit(ctx); e != nil {
@@ -693,16 +676,31 @@ func (a *App) agentKick(ctx context.Context, r *agentRun, b domain.Block, input 
 		if tag.RowsAffected() == 0 {
 			return a.agentKick(ctx, r, b, input)
 		}
+	} else {
+		if e = json.Unmarshal(intentJSON, &intent); e != nil {
+			return nil, "", e
+		}
+		// Legacy ambiguous intents have no stable gateway key or actor. Presence
+		// in the group cannot establish whether a previous kick already completed.
+		if intent.Key == "" || intent.ByAccountID == "" || intent.Target == "" {
+			return nil, "", fmt.Errorf("unkeyed kick intent cannot be safely replayed")
+		}
 	}
-	e = a.gateway(ctx, "POST", "/groups/"+*g.GatewayGroupID+"/kick", map[string]any{"byAccountId": account, "targetPlatformUserId": target}, nil)
-	if e != nil {
+	for {
+		e = a.gateway(ctx, "POST", "/groups/"+*g.GatewayGroupID+"/kick", intent, nil)
+		if e == nil {
+			break
+		}
 		code := externalCode(e)
 		if code == "NETWORK_TIMEOUT" || code == "GATEWAY_UNAVAILABLE" {
-			_, e = a.pool.Exec(ctx, `UPDATE agent_effects SET started_at=now()-interval '12 seconds' WHERE run_id=$1 AND key=$2`, r.ID, key)
-			if e != nil {
-				return nil, "", e
+			// Retry only this durable key. The gateway returns its stored result
+			// or remains fail closed when its own platform effect is uncertain.
+			select {
+			case <-ctx.Done():
+				return nil, "", ctx.Err()
+			case <-time.After(200 * time.Millisecond):
 			}
-			return a.agentKick(ctx, r, b, input)
+			continue
 		}
 		if code != "OWNER_LEFT" && code != "NO_PERMISSION" {
 			code = "SEND_FAILED"

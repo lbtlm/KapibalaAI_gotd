@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lbtlm/KapibalaAI_gotd/backend/internal/domain"
 	"github.com/lbtlm/KapibalaAI_gotd/backend/internal/platform"
 	"net"
@@ -28,7 +29,9 @@ func TestServerProcessHelper(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer a.Close()
-	a.Start(context.Background())
+	if e = a.Start(context.Background()); e != nil {
+		t.Fatal(e)
+	}
 	l, e := net.Listen("tcp", "127.0.0.1:0")
 	if e != nil {
 		t.Fatal(e)
@@ -37,6 +40,92 @@ func TestServerProcessHelper(t *testing.T) {
 	if e = http.Serve(l, a.Handler()); e != nil {
 		t.Fatal(e)
 	}
+}
+
+func TestHardRestartAfterSentBeforeSequenceAdvanceRebasesNextDelay(t *testing.T) {
+	g := gatewayFixture(t)
+	entered, release := make(chan struct{}, 1), make(chan struct{})
+	base := g.server.Config.Handler
+	g.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/groups/gateway-group/send" {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		base.ServeHTTP(w, r)
+	})
+	a, _, cfg := fixtureConfig(t, platform.Config{GatewayURL: g.server.URL})
+	a.Close()
+	cmd, s := childServer(t, cfg)
+	alive := true
+	defer func() {
+		if alive {
+			cmd.Process.Kill()
+			cmd.Wait()
+		}
+	}()
+	token, _ := login(t, s, "admin")
+	group := createGroup(t, s, token)
+	_, sequence, _ := call(t, s, "POST", "/api/sequences", token, `{"name":"sent checkpoint","steps":[{"index":1,"accountRole":"admin","text":"first","delaySeconds":0},{"index":2,"accountRole":"member","text":"second","delaySeconds":0.3}]}`)
+	_, body, _ := call(t, s, "POST", "/api/groups/"+group+"/sequence-runs", token, `{"sequenceId":"`+sequence["id"].(string)+`"}`)
+	run := body["runId"].(string)
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("send not reached")
+	}
+	// Infrastructure fault: block only advancement, allowing receipt persistence.
+	pool, e := pgxpool.New(context.Background(), cfg.DatabaseURL)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer pool.Close()
+	tx, e := pool.Begin(context.Background())
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer tx.Rollback(context.Background())
+	if _, e = tx.Exec(context.Background(), `SELECT id FROM sequence_runs WHERE id=$1 FOR UPDATE`, run); e != nil {
+		t.Fatal(e)
+	}
+	close(release)
+	eventually(t, 4*time.Second, func() bool {
+		_, detail, _ := call(t, s, "GET", "/api/sequence-runs/"+run, token, "")
+		return detail["currentStepIndex"] == float64(1) && detail["steps"].([]any)[0].(map[string]any)["status"] == "sent"
+	})
+	cmd.Process.Kill()
+	cmd.Wait()
+	alive = false
+	tx.Rollback(context.Background())
+	time.Sleep(500 * time.Millisecond)
+	start := time.Now()
+	restarted, server := childServer(t, cfg)
+	defer func() { restarted.Process.Kill(); restarted.Wait() }()
+	eventually(t, 2*time.Second, func() bool {
+		_, detail, _ := call(t, server, "GET", "/api/sequence-runs/"+run, token, "")
+		step := detail["steps"].([]any)[1].(map[string]any)
+		if step["scheduledAt"] == nil {
+			return false
+		}
+		at, e := time.Parse(time.RFC3339Nano, step["scheduledAt"].(string))
+		if e != nil {
+			t.Fatal(e)
+		}
+		if at.Sub(start) < 280*time.Millisecond {
+			t.Fatalf("next delay used pre-crash receipt: %v", at.Sub(start))
+		}
+		return true
+	})
+	eventually(t, 4*time.Second, func() bool {
+		_, detail, _ := call(t, server, "GET", "/api/sequence-runs/"+run, token, "")
+		return detail["status"] == "finished"
+	})
 }
 func childServer(t *testing.T, cfg platform.Config) (*exec.Cmd, *httptest.Server) {
 	t.Helper()

@@ -88,7 +88,9 @@ func (a *App) noteInconsistency(ctx context.Context, kind, ref, message string) 
 }
 func (a *App) inboxTick(ctx context.Context) {
 	a.lock(ctx, "inbox", func(ctx context.Context) error {
-		rows, e := a.pool.Query(ctx, `SELECT event_id FROM gateway_inbox WHERE NOT processed AND received_at<now()-interval '1100 milliseconds' ORDER BY event_id`)
+		// Only an eligible ordered prefix can execute: a younger known lower ID
+		// must hold later IDs until their original order can be preserved.
+		rows, e := a.pool.Query(ctx, `SELECT event_id FROM gateway_inbox WHERE NOT processed AND received_at<now()-interval '1100 milliseconds' AND event_id<COALESCE((SELECT min(event_id) FROM gateway_inbox WHERE NOT processed AND received_at>=now()-interval '1100 milliseconds'),9223372036854775807) ORDER BY event_id`)
 		if e != nil {
 			return e
 		}

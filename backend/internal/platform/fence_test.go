@@ -36,13 +36,21 @@ func TestLostAdvisoryConnectionCancelsOldWorkerAndReconcilesKickOnce(t *testing.
 	entered, cancelled, release := make(chan struct{}, 1), make(chan struct{}, 1), make(chan struct{})
 	defer close(release)
 	var kicks, audits atomic.Int32
+	kickedKeys := map[string]bool{}
 	base := g.server.Config.Handler
 	g.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" && r.URL.Path == "/groups/gateway-group/kick" {
 			var request map[string]any
 			json.NewDecoder(r.Body).Decode(&request)
-			kicks.Add(1)
 			g.mu.Lock()
+			key, _ := request["idempotencyKey"].(string)
+			if key != "" && kickedKeys[key] {
+				g.mu.Unlock()
+				fmt.Fprint(w, `{"kicked":true}`)
+				return
+			}
+			kickedKeys[key] = true
+			kicks.Add(1)
 			delete(g.members, "outside")
 			g.mu.Unlock()
 			select {

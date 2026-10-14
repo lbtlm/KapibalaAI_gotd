@@ -249,7 +249,7 @@ func (a *App) sequenceOne(ctx context.Context, id string) error {
 			return e
 		}
 		if delivery == "accepted" {
-			_, e = tx.Exec(ctx, `UPDATE sequence_steps SET status='accepted' WHERE run_id=$1 AND index=$2`, id, index)
+			_, e = tx.Exec(ctx, `UPDATE sequence_steps SET status='accepted' WHERE run_id=$1 AND index=$2 AND status='pending'`, id, index)
 			if e != nil {
 				return e
 			}
@@ -311,6 +311,7 @@ func (a *App) sequenceOne(ctx context.Context, id string) error {
 	}
 	return tx.Commit(ctx)
 }
-func (a *App) recoverSequences(ctx context.Context) {
-	a.pool.Exec(ctx, `UPDATE sequence_steps s SET scheduled_at=now()+make_interval(secs=>s.delay_seconds) FROM sequence_runs r WHERE s.run_id=r.id AND r.status='running' AND s.index=r.current_step_index AND s.status='pending' AND s.client_msg_id IS NULL AND s.scheduled_at<now()`)
+func (a *App) recoverSequences(ctx context.Context) error {
+	_, e := a.pool.Exec(ctx, `UPDATE sequence_steps s SET scheduled_at=now()+make_interval(secs=>s.delay_seconds) FROM sequence_runs r JOIN sequence_steps cur ON cur.run_id=r.id AND cur.index=r.current_step_index WHERE s.run_id=r.id AND r.status='running' AND s.status='pending' AND s.client_msg_id IS NULL AND ((s.index=r.current_step_index AND s.scheduled_at<now()) OR (s.index=r.current_step_index+1 AND cur.status IN ('sent','skipped') AND COALESCE(s.scheduled_at,cur.sent_at+make_interval(secs=>s.delay_seconds))<now()))`)
+	return e
 }

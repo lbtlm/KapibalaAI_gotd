@@ -26,7 +26,10 @@ func main() {
 		os.Exit(1)
 	}
 	defer a.Close()
-	a.Start(ctx)
+	if e = a.Start(ctx); e != nil {
+		slog.Error("backend worker startup refused", "error", e)
+		os.Exit(1)
+	}
 	host := os.Getenv("BIND_HOST")
 	if host == "" {
 		host = "127.0.0.1"
