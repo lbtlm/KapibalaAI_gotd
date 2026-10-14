@@ -1,0 +1,105 @@
+# Message gateway
+
+Go 1.24 gateway for the section 2.1 HTTP/SSE contract. `fake` and `telegram` use the same routes and response envelopes. Production requires PostgreSQL; the memory store exists only for protocol tests. The default listener is `127.0.0.1:8081`. This service is intended for a private application network; Docker explicitly binds `0.0.0.0` inside its container.
+
+## Run the simulator
+
+```powershell
+Set-Location gateway
+$env:DATABASE_URL = 'postgres://kapibala@127.0.0.1:55432/kapibala_test?sslmode=disable'
+$env:GATEWAY_MODE = 'fake'
+$env:GATEWAY_ADMIN_ENABLED = 'true'
+go run ./cmd/gateway
+```
+
+`PORT` defaults to `8081`; `BIND_HOST` defaults to `127.0.0.1`. The entrypoint creates only `gateway_*` tables. It retains all event history, pending fake effects, earliest message results, group/account state, real send random-ID correlations and update cursors. A fixed PostgreSQL connection owns the writer lease and performs state writes; another gateway process is refused. Lost lease ownership cancels the service and platform clients. The stored mode rejects switching the same database between fake and Telegram.
+
+The simulator seeds `account-1`, `account-2`, `account-3` with stable platform IDs `10001`, `10002`, `10003`. Connect sets an account online. Creating a group immediately includes its creator and produces no creator `member_joined`. Join applies membership after 100 ms, then emits its event 100 ms later. Successful kick/leave remove membership before returning and emit events later. Sending schedules a durable effect after 50 ms. Reusing `clientMsgId` produces another message; the query returns the first landed message.
+
+## Fake controls
+
+Controls are registered only when mode is `fake` and `GATEWAY_ADMIN_ENABLED=true`. They do not exist in Telegram mode.
+
+| Endpoint | Body |
+|---|---|
+| `POST /admin/faults` | `{operation, code, accountId?, groupId?, count?, retryAfterSeconds?, settleAfterMs?, effect?}` |
+| `POST /admin/events` | `{type, data, delayMs?}` where data is the specified event payload |
+| `POST /admin/delivery` | `{duplicate, reorder, disconnectAfter}` |
+| `POST /admin/group` | `{groupId, writable?, inviteExpired?}` |
+| `POST /admin/reset` | clears fake state and events; use only in isolated tests |
+
+`count` defaults to one; `-1` remains active. Operations are `any`, `connect`, `disconnect`, `create`, `invite`, `join`, `promote`, `kick`, `leave`, `send`, `members`, `query`, `events`.
+
+Supported failure controls:
+
+- `GATEWAY_UNAVAILABLE` / `SERVICE_UNAVAILABLE`: 503, including SSE and message queries.
+- `NETWORK_TIMEOUT`: send/kick return 504. `effect=true` completes after `settleAfterMs` (default 100 ms, capped at 1900 ms); `false` has no effect. Create with `effect=true` creates then returns 504; the optional internal `idempotencyKey` recovers the same group.
+- `RATE_LIMITED`: send returns 429 and `retryAfterSeconds` (default one). Every attempt during the cooldown restarts the same duration.
+- `ACCOUNT_SUSPENDED`, `SESSION_EXPIRED`: permanent account states, all group memberships removed, status/member events emitted.
+- `GROUP_WRITE_FORBIDDEN`, `SENDER_NOT_IN_GROUP`, `NO_PERMISSION`, `NOT_MEMBER_YET`, `OWNER_LEFT`, `ALREADY_MEMBER`: corresponding protocol errors.
+- `LEAVE_FAILED`: leave returns 500 without removing membership.
+- `INVITE_DELAY`: next invite advertises `settleAfterMs`; join is rejected until ready. `INVITE_EXPIRED` or `/admin/group` expires an existing link.
+- `JOIN_MISSING`: accepts a join without adding the member or producing an event.
+- `ASYNC_FAILED`: accepts a send, then emits `message_failed`; `effect=false` means `GROUP_WRITE_FORBIDDEN`, `effect=true` means `ACCOUNT_SUSPENDED` and terminal account state.
+
+Delivery duplicates original event IDs; reorder swaps adjacent frames in one delivery batch. `disconnectAfter` counts emitted frames. `since` is exclusive. Omitting it starts at the current cursor; specifying zero replays all history. The consumer is responsible for deduplication and out-of-order handling.
+
+External-message example:
+
+```json
+{"type":"message","data":{"groupId":"group-1","msgId":"external-1","senderPlatformUserId":"90001","text":"Please reply","sentAt":"2026-10-14T15:00:00.000Z"}}
+```
+
+Member injection changes the member list immediately, with an optional delayed event. Account-status injection accepts only `suspended` / `session_expired`. Old message supplement events may preserve their original `msgId` / `sentAt` while receiving a new event ID.
+
+## Telegram mode
+
+Use a separate database from the simulator and an ignored private manifest. No original Session is written. The converted Session and renewed authorization data live in `gateway_sessions`.
+
+```json
+[
+  {
+    "id":"account-1",
+    "apiId":1,
+    "apiHash":"<private value>",
+    "sessionPath":"<absolute path to an isolated session copy>",
+    "sessionFormat":"TelethonSQLite",
+    "deviceModel":"Desktop",
+    "systemVersion":"Windows 10",
+    "appVersion":"1.0.0"
+  }
+]
+```
+
+Formats: `gotdJSON`, `TelethonSQLite`, `tdataZIP`. ZIP import is bounded and rejects unsafe paths, symlinks and multiple account identities; optional `passcode` is manifest-only. Telethon SQLite opens in read-only mode. API credentials are explicit; no default official-app credentials are copied from the source.
+
+```powershell
+Set-Location gateway
+$env:DATABASE_URL = 'postgres://kapibala@127.0.0.1:55432/kapibala_live?sslmode=disable'
+$env:GATEWAY_MODE = 'telegram'
+$env:TELEGRAM_ACCOUNTS_FILE = '../.local/telegram/service-accounts.json'
+go run ./cmd/gateway
+```
+
+After connecting the configured service aliases, `POST /groups/import {"username":"test_kapibala","accountIds":["account-1","account-2"]}` resolves only the selected existing group and records actual membership/roles. It performs no join, promotion or send. Gateway group IDs are `tg-<channel ID>`; backend group IDs remain separate. Members include the additional `role` field (`creator`, `admin`, `member`). An external group creator is never replaced with a service account.
+
+Telegram operations reuse gotd v0.112.0. Updates are converted only for registered groups, including outgoing messages; duplicates across service clients produce one `message` event. User/channel SDK update state is distinct from the SSE cursor and persists in dedicated tables. Previously online configured accounts reconnect after reconstruction.
+
+Each send stores an intent and cryptographic random ID before the RPC. Returned/pushed random-ID mappings recover `message_sent`, even when the public message arrived first. An unknown effect is never automatically re-sent. If Telegram has not supplied enough information to reconcile an unknown effect, its query returns 504 rather than asserting absence. The simulator guarantees the specified two-second convergence; a real platform outage cannot provide that guarantee and remains an explicit live-acceptance boundary. Internal create keys persist intent and use a deterministic group title for read-only reconciliation; an unreconciled create returns 504 and is not blindly repeated.
+
+`GET /media/:id` returns 404: optional media materialization is outside the delivered core slice. Telegram event timestamps retain platform seconds as ISO8601 UTC; fake timestamps have millisecond precision. Real Telegram does not expose sub-second original server timestamps.
+
+## Verification and authorized probe
+
+```powershell
+Set-Location gateway
+$env:GATEWAY_TEST_DATABASE_URL = 'postgres://kapibala@127.0.0.1:55432/kapibala_test?sslmode=disable'
+go test ./...
+go test -race ./...
+go vet ./...
+go build ./cmd/gateway ./cmd/probe
+```
+
+The PostgreSQL tests skip with an explicit reason if the test DSN is absent. They exercise reconstruction and disconnection of the writer-lock session against a real database. Use an isolated database: the lease failure test terminates only the session holding this gateway's advisory lock.
+
+`cmd/probe` uses `NoUpdates` and only calls Self, ResolveUsername and GetParticipant(self). `-account=<alias>` selects one account; `-out=<ignored local path>` avoids printing private display names. The explicit `-join` option makes one join attempt per configured alias and requires an authorized test group; it stops each failed account without retry. Its live invocation is never part of CI. See `docs/tdd-gateway.md` and `docs/reuse-gateway.md` for evidence and source lineage.
