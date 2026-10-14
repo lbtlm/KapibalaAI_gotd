@@ -37,3 +37,7 @@ git switch -c feat/your-topic
 按公共契约逐片实现：先运行会失败的行为测试，再复用或实现代码使其通过，最后整理重复。集成测试使用真实 PostgreSQL；E2E 使用真实前端、后端、模拟网关与脚本 Agent。真实 Telegram 与 LLM 验收单独记录，缺少凭据不能记作通过。
 
 空仓库仅用一个不含业务代码的空提交建立 `main` 和 `dev`，此后遵守以上流程。
+
+## Remote enforcement
+
+2026-10-14 已核实 GitHub 默认分支为 `main`，`main` 和 `dev` 均启用 PR 必须、`CI Gate` 必须、管理员同样受约束、禁止强推/删除及要求解决审查讨论。PR 目标分支和提交格式由 CI 检查；保护规则不会替代应用功能验收。

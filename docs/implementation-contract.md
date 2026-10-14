@@ -55,3 +55,7 @@ Provider docs verified 2026-10-14: https://api-docs.deepseek.com/guides/thinking
 ## Git workflow (user confirmed)
 
 main is stable; dev is the integration branch. All feat/*, fix/*, hotfix/*, docs/* and other development branches must PR into dev. No direct application commits to main/dev. One empty bootstrap commit establishes the initially empty branches. Controller owns shared-checkout Git operations. See AGENTS.md and CONTRIBUTING.md.
+
+## Existing test group import
+
+Gateway GET /groups/:id/members additionally returns role=creator|admin|member. Admin-only POST /api/groups/import accepts {gatewayGroupId,accountIds[]} and verifies the selected online accounts against actual gateway membership/roles. Imported groups may have an external creator, represented by empty creatorAccountId; no creator privilege is fabricated. Leave-all only operates selected service members and never the external owner. Original group creation behavior remains unchanged.

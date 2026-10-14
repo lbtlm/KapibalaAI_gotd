@@ -18,3 +18,16 @@ Controller owns final acceptance. Worker model/effort were explicitly requested 
 - Isolated PostgreSQL 16.11 on localhost port 55432; no existing application database modified.
 - `main` stable, `dev` integration; all working branches PR into `dev`. No business code was committed before this rule was supplied.
 - Remaining: full A/B and S1–S8 behaviors, combined browser E2E, stable auth/recovery independent review with verified read-only runtime, real Telegram probe/acceptance, keyed DeepSeek acceptance, remote CI and reviewed PR delivery.
+
+## Git state
+
+- Empty bootstrap: `4ce04a3`, both main/dev.
+- Requirements/workflow commit: `99cfa86` on `feat/telegram-agent-platform`.
+- Draft PR: https://github.com/lbtlm/KapibalaAI_gotd/pull/1, base `dev`.
+- Remote main/dev protection is configured and read back: PR required, required CI Gate, admins enforced, no force push or deletion. Default branch main; repository private.
+
+## Interface revision and CodeGraph
+
+- User rejected the first UI visual direction. Functional baseline committed as `3403a4e`; Iris resumed F2 with interface-design and design-taste-frontend. Visual acceptance remains pending, despite F1 unit/build passing. Rowan dispatch deferred until a worker slot is released.
+- User explicitly requested CodeGraph initialization. `codegraph init .` succeeded: 86 files, 1,062 nodes, 2,389 edges. MCP explore verified. Local DB/WAL/SHM ignored; only .codegraph/.gitignore is tracked. Re-sync before stable review. All active workers notified to use CodeGraph first.
+- Three isolated Telegram Session copies passed authentication and resolved the designated group. Each joined exactly once successfully; all are ordinary members. No send/kick/leave/role change has occurred. Further live acceptance requires the appropriate group permissions.
