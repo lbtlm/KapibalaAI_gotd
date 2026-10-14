@@ -73,13 +73,13 @@ func (d updateStorage) GetChannelPts(ctx context.Context, uid, cid int64) (int, 
 	if e == sql.ErrNoRows {
 		return 0, false, nil
 	}
-	return pts, e == nil, e
+	return pts, e == nil && pts > 0, e
 }
 func (d updateStorage) SetChannelPts(ctx context.Context, uid, cid int64, pts int) error {
 	return d.exec(ctx, "INSERT INTO gateway_channel_state(account_id,user_id,channel_id,pts) VALUES($1,$2,$3,$4) ON CONFLICT(account_id,user_id,channel_id) DO UPDATE SET pts=$4", d.id, uid, cid, pts)
 }
 func (d updateStorage) ForEachChannels(ctx context.Context, uid int64, f func(context.Context, int64, int) error) error {
-	rows, e := d.db.QueryContext(ctx, "SELECT channel_id,pts FROM gateway_channel_state WHERE account_id=$1 AND user_id=$2", d.id, uid)
+	rows, e := d.db.QueryContext(ctx, "SELECT channel_id,pts FROM gateway_channel_state WHERE account_id=$1 AND user_id=$2 AND pts>0", d.id, uid)
 	if e != nil {
 		return e
 	}

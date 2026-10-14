@@ -153,8 +153,7 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (string, error
 				return e
 			}
 			s.self = self
-			ready <- nil
-			return manager.Run(live, pipeline.API, self.ID, updates.AuthOptions{IsBot: self.Bot})
+			return pipeline.Run(live, manager, self.ID, updates.AuthOptions{IsBot: self.Bot, OnStart: func(context.Context) { ready <- nil }})
 		})
 		select {
 		case ready <- err:

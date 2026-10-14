@@ -34,6 +34,8 @@ type remoteTelegram struct {
 	onPeerDialogs    func(context.Context) error
 	onParticipants   func(context.Context) error
 	sendErrors       []error
+	noDialog         bool
+	onHistory        func(context.Context, *tg.ChannelsGetMessagesRequest) error
 }
 
 func (r *remoteTelegram) Invoke(ctx context.Context, in bin.Encoder, out bin.Decoder) error {
@@ -52,8 +54,20 @@ func (r *remoteTelegram) Invoke(ctx context.Context, in bin.Encoder, out bin.Dec
 				return e
 			}
 		}
-		response = &tg.MessagesPeerDialogs{Dialogs: []tg.DialogClass{&tg.Dialog{Peer: &tg.PeerChannel{ChannelID: 321}, TopMessage: r.peerTop, Pts: 80, NotifySettings: tg.PeerNotifySettings{}}}}
+		if r.noDialog {
+			response = &tg.MessagesPeerDialogs{}
+		} else {
+			response = &tg.MessagesPeerDialogs{Dialogs: []tg.DialogClass{&tg.Dialog{Peer: &tg.PeerChannel{ChannelID: 321}, TopMessage: r.peerTop, Pts: 80, NotifySettings: tg.PeerNotifySettings{}}}}
+		}
 	case *tg.ChannelsGetMessagesRequest:
+		r.mu.Lock()
+		hook := r.onHistory
+		r.mu.Unlock()
+		if hook != nil {
+			if e := hook(ctx, req); e != nil {
+				return e
+			}
+		}
 		ids := make([]int, 0, len(req.ID))
 		messages := make([]tg.MessageClass, 0, len(req.ID))
 		for _, item := range req.ID {

@@ -15,18 +15,19 @@ type account struct {
 	RetrySeconds int       `json:"retrySeconds"`
 }
 type group struct {
-	Owner          string            `json:"owner"`
-	Members        map[string]bool   `json:"members"`
-	Admins         map[string]bool   `json:"admins"`
-	Invite         string            `json:"invite"`
-	InviteReady    time.Time         `json:"inviteReady"`
-	InviteExpired  bool              `json:"inviteExpired"`
-	Writable       bool              `json:"writable"`
-	ChannelID      int64             `json:"channelId"`
-	AccessHashes   map[string]int64  `json:"accessHashes"`
-	MemberRoles    map[string]string `json:"memberRoles"`
-	HistoryThrough map[string]int    `json:"historyThrough"`
-	Recovery       *HistoryRecovery  `json:"recovery,omitempty"`
+	Owner                  string            `json:"owner"`
+	Members                map[string]bool   `json:"members"`
+	Admins                 map[string]bool   `json:"admins"`
+	Invite                 string            `json:"invite"`
+	InviteReady            time.Time         `json:"inviteReady"`
+	InviteExpired          bool              `json:"inviteExpired"`
+	Writable               bool              `json:"writable"`
+	ChannelID              int64             `json:"channelId"`
+	AccessHashes           map[string]int64  `json:"accessHashes"`
+	MemberRoles            map[string]string `json:"memberRoles"`
+	HistoryThrough         map[string]int    `json:"historyThrough"`
+	VerifiedHistoryThrough map[string]int    `json:"verifiedHistoryThrough,omitempty"`
+	Recovery               *HistoryRecovery  `json:"recovery,omitempty"`
 }
 
 // HistoryRecovery describes a proven channel-ID range and any visible limitations.

@@ -65,13 +65,18 @@ func (a *TelegramAdapter) noteChannelGap(aid string, cid int64) {
 	if g.Recovery != nil && g.Recovery.Status == "blocked" {
 		return
 	}
-	g.Recovery = &HistoryRecovery{AccountID: aid, Status: "blocked", Code: "CHANNEL_GAP_UNRECOVERED", UpdatedAt: timeNow()}
+	if g.Recovery == nil || g.Recovery.AccountID != aid {
+		g.Recovery = &HistoryRecovery{AccountID: aid}
+	}
+	g.Recovery.Status = "blocked"
+	g.Recovery.Code = "CHANNEL_GAP_UNRECOVERED"
+	g.Recovery.UpdatedAt = timeNow()
 	if e := s.save(context.Background()); e != nil {
 		s.cancel()
 	}
 }
 
-func (a *TelegramAdapter) recoverChannelRange(parent context.Context, aid string, api *tg.Client, channel *tg.InputChannel, target int) error {
+func (a *TelegramAdapter) recoverChannelRange(parent context.Context, aid string, api *tg.Client, channel *tg.InputChannel, target int, verifiedOnly bool) error {
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 	s := a.service
@@ -86,11 +91,25 @@ func (a *TelegramAdapter) recoverChannelRange(parent context.Context, aid string
 		g.HistoryThrough = map[string]int{}
 	}
 	through := g.HistoryThrough[aid]
+	if g.VerifiedHistoryThrough == nil {
+		g.VerifiedHistoryThrough = map[string]int{}
+	}
+	if old := g.Recovery; old != nil && old.AccountID == aid && old.FromID == 1 && old.ThroughID > g.VerifiedHistoryThrough[aid] && old.ThroughID <= through {
+		g.VerifiedHistoryThrough[aid] = old.ThroughID
+	}
+	if verifiedOnly {
+		through = g.VerifiedHistoryThrough[aid]
+	}
 	if g.Recovery != nil && through >= target && g.Recovery.Status == "recovered_with_limits" {
 		s.mu.Unlock()
 		return nil
 	}
 	recovery := &HistoryRecovery{AccountID: aid, Status: "pending", FromID: through + 1, ThroughID: through, TargetID: target, UpdatedAt: timeNow()}
+	if previous := g.Recovery; previous != nil && previous.AccountID == aid && previous.Status != "recovered_with_limits" && previous.ThroughID == through && previous.FromID > 0 {
+		recovery.FromID = previous.FromID
+		recovery.RecoveredMessages = previous.RecoveredMessages
+		recovery.UnavailableIDs = append([]int(nil), previous.UnavailableIDs...)
+	}
 	g.Recovery = recovery
 	if target-through > 10000 {
 		g.Recovery.Status = "blocked"
@@ -189,7 +208,12 @@ func (a *TelegramAdapter) recoverChannelRange(parent context.Context, aid string
 			}
 		}
 		a.handleUpdates(aid, &tg.Updates{Updates: updatesForMessages(ordered)})
-		g.HistoryThrough[aid] = end
+		if end > g.HistoryThrough[aid] {
+			g.HistoryThrough[aid] = end
+		}
+		if g.VerifiedHistoryThrough[aid] >= start-1 {
+			g.VerifiedHistoryThrough[aid] = end
+		}
 		g.Recovery = recovery
 		recovery.ThroughID = end
 		recovery.RecoveredMessages += count

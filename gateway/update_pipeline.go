@@ -21,6 +21,40 @@ type UpdatePipeline struct {
 	gate             *ingestGate
 }
 
+// Run is the account pipeline's actual SDK lifecycle boundary.
+func (p *UpdatePipeline) Run(ctx context.Context, manager *updates.Manager, uid int64, opt updates.AuthOptions) error {
+	d := p.API.(*durableDifferenceAPI)
+	d.adapter.service.mu.Lock()
+	var channels []int64
+	for _, g := range d.adapter.service.state.Groups {
+		if g.AccessHashes[d.aid] != 0 {
+			channels = append(channels, g.ChannelID)
+		}
+	}
+	d.adapter.service.mu.Unlock()
+	sort.Slice(channels, func(i, j int) bool { return channels[i] < channels[j] })
+	for _, cid := range channels {
+		_, found, e := p.Storage.GetChannelPts(ctx, uid, cid)
+		if e != nil {
+			return e
+		}
+		if found {
+			continue
+		}
+		pts, e := d.recoverChannelCheckpoint(ctx, cid, true)
+		if e != nil {
+			d.adapter.noteChannelGap(d.aid, cid)
+			d.gate.fail(e)
+			return e
+		}
+		if e = p.Storage.SetChannelPts(ctx, uid, cid, pts); e != nil {
+			d.gate.fail(e)
+			return e
+		}
+	}
+	return manager.Run(ctx, p.API, uid, opt)
+}
+
 // Updates constructs this account's SDK API, durable storage and event handler.
 func (a *TelegramAdapter) Updates(aid string, api *tg.Client, cancel context.CancelFunc) *UpdatePipeline {
 	gate := &ingestGate{cancel: cancel}
@@ -149,6 +183,7 @@ func (d *durableDifferenceAPI) UpdatesGetDifference(ctx context.Context, req *tg
 		sort.Slice(channels, func(i, j int) bool { return channels[i] < channels[j] })
 		for _, cid := range channels {
 			if e = d.recoverCurrentChannel(ctx, cid); e != nil {
+				d.adapter.noteChannelGap(d.aid, cid)
 				d.gate.fail(e)
 				return nil, e
 			}
@@ -162,6 +197,10 @@ func (d *durableDifferenceAPI) UpdatesGetDifference(ctx context.Context, req *tg
 	return diff, nil
 }
 func (d *durableDifferenceAPI) recoverCurrentChannel(parent context.Context, cid int64) error {
+	_, e := d.recoverChannelCheckpoint(parent, cid, false)
+	return e
+}
+func (d *durableDifferenceAPI) recoverChannelCheckpoint(parent context.Context, cid int64, verifiedOnly bool) (int, error) {
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 	s := d.adapter.service
@@ -169,27 +208,30 @@ func (d *durableDifferenceAPI) recoverCurrentChannel(parent context.Context, cid
 	g := s.state.Groups["tg-"+stringID(cid)]
 	if g == nil {
 		s.mu.Unlock()
-		return nil
+		return 0, nil
 	}
 	hash := g.AccessHashes[d.aid]
 	s.mu.Unlock()
 	opCtx, stop, e := s.operationContext(ctx)
 	if e != nil {
-		return e
+		return 0, e
 	}
 	dialogs, e := d.api.MessagesGetPeerDialogs(opCtx, []tg.InputDialogPeerClass{&tg.InputDialogPeer{Peer: &tg.InputPeerChannel{ChannelID: cid, AccessHash: hash}}})
 	stop()
 	if e != nil {
-		return &APIError{503, "CHANNEL_HISTORY_UNAVAILABLE", 0}
+		return 0, &APIError{503, "CHANNEL_HISTORY_UNAVAILABLE", 0}
 	}
 	for _, item := range dialogs.Dialogs {
 		if dialog, ok := item.(*tg.Dialog); ok {
 			if peer, ok := dialog.Peer.(*tg.PeerChannel); ok && peer.ChannelID == cid {
-				return d.adapter.recoverChannelRange(ctx, d.aid, d.api, &tg.InputChannel{ChannelID: cid, AccessHash: hash}, dialog.TopMessage)
+				if dialog.Pts <= 0 {
+					return 0, &APIError{503, "CHANNEL_HISTORY_INCOMPLETE", 0}
+				}
+				return dialog.Pts, d.adapter.recoverChannelRange(ctx, d.aid, d.api, &tg.InputChannel{ChannelID: cid, AccessHash: hash}, dialog.TopMessage, verifiedOnly)
 			}
 		}
 	}
-	return &APIError{503, "CHANNEL_HISTORY_INCOMPLETE", 0}
+	return 0, &APIError{503, "CHANNEL_HISTORY_INCOMPLETE", 0}
 }
 func (d *durableDifferenceAPI) UpdatesGetChannelDifference(ctx context.Context, req *tg.UpdatesGetChannelDifferenceRequest) (tg.UpdatesChannelDifferenceClass, error) {
 	diff, e := d.api.UpdatesGetChannelDifference(ctx, req)
@@ -207,7 +249,7 @@ func (d *durableDifferenceAPI) UpdatesGetChannelDifference(ctx context.Context, 
 		if !ok || !valid {
 			e = &APIError{503, "CHANNEL_HISTORY_INCOMPLETE", 0}
 		} else {
-			e = d.adapter.recoverChannelRange(ctx, d.aid, d.api, channel, dialog.TopMessage)
+			e = d.adapter.recoverChannelRange(ctx, d.aid, d.api, channel, dialog.TopMessage, false)
 		}
 		if e != nil {
 			d.gate.fail(e)

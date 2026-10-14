@@ -12,7 +12,7 @@ import (
 
 func TestTooLongResumesAfterLastPersistedBatch(t *testing.T) {
 	store := testPG(t)
-	remote := &remoteTelegram{messages: map[int64]int{}, omitHistoryID: 150, difference: &tg.UpdatesChannelDifferenceTooLong{Final: true, Dialog: &tg.Dialog{Peer: &tg.PeerChannel{ChannelID: 321}, TopMessage: 205, Pts: 90, NotifySettings: tg.PeerNotifySettings{}}}}
+	remote := &remoteTelegram{messages: map[int64]int{}, omitHistoryID: 150, difference: &tg.UpdatesChannelDifferenceTooLong{Final: true, Dialog: &tg.Dialog{Peer: &tg.PeerChannel{ChannelID: 321}, TopMessage: 205, Pts: 90, NotifySettings: tg.PeerNotifySettings{}}}, history: []tg.MessageClass{&tg.Message{ID: 1, PeerID: &tg.PeerChannel{ChannelID: 321}, FromID: &tg.PeerUser{UserID: 90001}, Date: 1700000000, Message: "batch-one-content"}}}
 	s, adapter, ts := updateTestService(t, store, store.DB, remote)
 	pipeline := adapter.Updates("account-1", tg.NewClient(remote), func() {})
 	req := &tg.UpdatesGetChannelDifferenceRequest{Channel: &tg.InputChannel{ChannelID: 321, AccessHash: 64}, Filter: &tg.ChannelMessagesFilterEmpty{}, Pts: 7, Limit: 100}
@@ -40,13 +40,115 @@ func TestTooLongResumesAfterLastPersistedBatch(t *testing.T) {
 		t.Fatal(e)
 	}
 	_, body = rpcCall(t, ts, "GET", "/groups/tg-321/recovery", nil)
-	if rec := body["recovery"].(map[string]any); rec["throughId"] != float64(205) || rec["fromId"] != float64(101) {
+	if rec := body["recovery"].(map[string]any); rec["throughId"] != float64(205) || rec["fromId"] != float64(1) || rec["recoveredMessages"] != float64(1) || len(rec["unavailableIds"].([]any)) != 204 || rec["unavailableIds"].([]any)[0] != float64(2) {
 		t.Fatal(body)
 	}
 	remote.mu.Lock()
 	defer remote.mu.Unlock()
 	if len(remote.historyRequests) != 4 || remote.historyRequests[2][0] != 101 || len(remote.historyRequests[3]) != 5 {
 		t.Fatalf("resumed outside persisted batch boundary: %v", remote.historyRequests)
+	}
+}
+
+func TestGlobalGapMetadataFailureIsDurableAcrossReconstruction(t *testing.T) {
+	for _, mode := range []string{"no-record-rpc-failed", "completed-no-dialog"} {
+		t.Run(mode, func(t *testing.T) {
+			store := testPG(t)
+			remote := &remoteTelegram{messages: map[int64]int{}, globalDifference: &tg.UpdatesDifferenceTooLong{Pts: 90}}
+			s, adapter, ts := updateTestService(t, store, store.DB, remote)
+			if mode == "completed-no-dialog" {
+				s.mu.Lock()
+				s.state.Groups["tg-321"].Recovery = &HistoryRecovery{AccountID: "account-1", Status: "recovered_with_limits", ThroughID: 1}
+				if e := s.save(context.Background()); e != nil {
+					t.Fatal(e)
+				}
+				s.mu.Unlock()
+				remote.noDialog = true
+			} else {
+				remote.onPeerDialogs = func(context.Context) error { return errors.New("metadata unavailable") }
+			}
+			pipeline := adapter.Updates("account-1", tg.NewClient(remote), func() {})
+			if _, e := pipeline.API.UpdatesGetDifference(context.Background(), &tg.UpdatesGetDifferenceRequest{}); e == nil {
+				t.Fatal("metadata failure acknowledged")
+			}
+			ts.Close()
+			s.Close()
+			store = testPG(t)
+			adapter = newTestRPCConnection(t, remote, store.DB)
+			var e error
+			s, e = New(context.Background(), Config{Mode: "fake", Store: store, Telegram: adapter})
+			if e != nil {
+				t.Fatal(e)
+			}
+			ts = httptest.NewServer(s)
+			defer func() { ts.Close(); s.Close() }()
+			_, body := rpcCall(t, ts, "GET", "/groups/tg-321/recovery", nil)
+			if rec, ok := body["recovery"].(map[string]any); !ok || rec["status"] != "blocked" {
+				t.Fatalf("global gap is invisible after reconstruction: %v", body)
+			}
+		})
+	}
+}
+
+func TestPendingBatchEvidenceSurvivesMetadataFailureAndShrinkingTarget(t *testing.T) {
+	store := testPG(t)
+	fault := &updateFailStore{PostgresStore: store}
+	remote := &remoteTelegram{messages: map[int64]int{}, globalDifference: &tg.UpdatesDifferenceTooLong{Pts: 90}, peerTop: 205, history: []tg.MessageClass{&tg.Message{ID: 1, PeerID: &tg.PeerChannel{ChannelID: 321}, FromID: &tg.PeerUser{UserID: 90001}, Date: 1700000000, Message: "pending-batch-content"}}}
+	remote.onHistory = func(_ context.Context, req *tg.ChannelsGetMessagesRequest) error {
+		if req.ID[0].(*tg.InputMessageID).ID == 101 {
+			fault.fail.Store(true)
+			return errors.New("process interrupted after committed batch")
+		}
+		return nil
+	}
+	s, adapter, ts := updateTestService(t, fault, store.DB, remote)
+	pipeline := adapter.Updates("account-1", tg.NewClient(remote), func() {})
+	if _, e := pipeline.API.UpdatesGetDifference(context.Background(), &tg.UpdatesGetDifferenceRequest{}); e == nil {
+		t.Fatal("interrupted batch acknowledged")
+	}
+	ts.Close()
+	s.Close()
+	store = testPG(t)
+	remote.onHistory = nil
+	remote.onPeerDialogs = func(context.Context) error { return errors.New("metadata unavailable after restart") }
+	adapter = newTestRPCConnection(t, remote, store.DB)
+	var e error
+	s, e = New(context.Background(), Config{Mode: "fake", Store: store, Telegram: adapter})
+	if e != nil {
+		t.Fatal(e)
+	}
+	ts = httptest.NewServer(s)
+	pipeline = adapter.Updates("account-1", tg.NewClient(remote), func() {})
+	if _, e = pipeline.API.UpdatesGetDifference(context.Background(), &tg.UpdatesGetDifferenceRequest{}); e == nil {
+		t.Fatal("metadata failure acknowledged")
+	}
+	_, body := rpcCall(t, ts, "GET", "/groups/tg-321/recovery", nil)
+	rec := body["recovery"].(map[string]any)
+	if rec["status"] != "blocked" || rec["throughId"] != float64(100) || rec["recoveredMessages"] != float64(1) || len(rec["unavailableIds"].([]any)) != 99 {
+		ts.Close()
+		s.Close()
+		t.Fatalf("metadata failure erased committed pending evidence: %v", body)
+	}
+	ts.Close()
+	s.Close()
+	store = testPG(t)
+	remote.onPeerDialogs = nil
+	remote.peerTop = 190
+	adapter = newTestRPCConnection(t, remote, store.DB)
+	s, e = New(context.Background(), Config{Mode: "fake", Store: store, Telegram: adapter})
+	if e != nil {
+		t.Fatal(e)
+	}
+	ts = httptest.NewServer(s)
+	defer func() { ts.Close(); s.Close() }()
+	pipeline = adapter.Updates("account-1", tg.NewClient(remote), func() {})
+	if _, e = pipeline.API.UpdatesGetDifference(context.Background(), &tg.UpdatesGetDifferenceRequest{}); e != nil {
+		t.Fatal(e)
+	}
+	_, body = rpcCall(t, ts, "GET", "/groups/tg-321/recovery", nil)
+	rec = body["recovery"].(map[string]any)
+	if rec["throughId"] != float64(190) || rec["fromId"] != float64(1) || rec["recoveredMessages"] != float64(1) || len(rec["unavailableIds"].([]any)) != 189 {
+		t.Fatalf("shrinking target erased persisted limitations: %v", body)
 	}
 }
 
