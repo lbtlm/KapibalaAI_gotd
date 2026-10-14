@@ -9,6 +9,7 @@ export class ApiClient {
   private session: Session | null = null
   private sessionGeneration = 0
   private refreshPromise: Promise<Session> | null = null
+  private cookieQueue: Promise<void> = Promise.resolve()
   private listeners = new Set<() => void>()
   constructor(baseURL = '') { this.instance = axios.create({ baseURL, withCredentials: true, timeout: 15000 }) }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
@@ -20,6 +21,12 @@ export class ApiClient {
   }
   private assertGeneration(generation: number) {
     if (generation !== this.sessionGeneration) throw new ApiError(401, 'SESSION_CHANGED', '会话已变更，旧请求已取消')
+  }
+  private cookieRequest<T>(generation: number, send: () => Promise<T>): Promise<T> {
+    // Serialize the HTTP boundary: the browser applies Set-Cookie before JSON handlers run.
+    const pending = this.cookieQueue.then(() => { this.assertGeneration(generation); return send() })
+    this.cookieQueue = pending.then(() => undefined, () => undefined)
+    return pending
   }
   private updateSession(session: Session | null) {
     if (session && !session.role) session.role = 'viewer'
@@ -55,9 +62,12 @@ export class ApiClient {
     const generation = this.sessionGeneration
     const sentToken = this.session?.accessToken
     try {
-      const response = await this.instance.request<T>({ url, method, data, headers: authenticated && sentToken ? { Authorization: 'Bearer ' + sentToken } : {} })
+      const send = () => this.instance.request<T>({ url, method, data, headers: authenticated && sentToken ? { Authorization: 'Bearer ' + sentToken } : {} })
+      const changesCookie = method === 'POST' && ['/api/auth/login', '/api/auth/refresh', '/api/auth/logout'].includes(url)
+      const response = await (changesCookie ? this.cookieRequest(generation, send) : send())
       return response.data
     } catch (error) {
+      if (error instanceof ApiError) throw error
       const e = error as AxiosError<{ error?: Record<string, unknown> }>
       if (e.response?.status === 401 && authenticated) this.assertGeneration(generation)
       if (e.response?.status === 401 && authenticated && retry) {

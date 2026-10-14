@@ -68,9 +68,9 @@ test.each(['logout', 'login-B'] as const)('待完成续期在%s后不能恢复�
   client.setSession({ accessToken: 'session-A', role: 'admin' })
   const oldRefresh = client.refresh().then(value => ({ value, error: undefined }), error => ({ value: undefined, error }))
   await started.promise
-  if (change === 'logout') await client.logout()
-  else await client.login('B', 'demo')
+  const changed = change === 'logout' ? client.logout() : client.login('B', 'demo')
   reply.release()
+  await changed
   const result = await oldRefresh
   expect(result.error?.code).toBe('SESSION_CHANGED')
   expect(client.getSession()).toEqual(change === 'logout' ? null : { accessToken: 'session-B', role: 'viewer' })
@@ -133,12 +133,13 @@ test('旧续期的迟到失败不能清除新B会话', async () => {
   client.setSession({ accessToken: 'session-A', role: 'admin' })
   const oldRefresh = client.refresh().catch(error => error)
   await started.promise
-  await client.login('B', 'demo')
+  const login = client.login('B', 'demo')
   reply.release()
+  await login
   expect(await oldRefresh).toMatchObject({ code: 'SESSION_CHANGED' })
   expect(client.getSession()).toEqual({ accessToken: 'session-B', role: 'viewer' })
 })
-test('旧续期收尾不会拆开B会话正在进行的单飞续期', async () => {
+test('旧续期完成后B会话仍共享单飞续期', async () => {
   const oldStarted = barrier(), oldReply = barrier(), newStarted = barrier(), newReply = barrier()
   let refreshes = 0
   server.use(
@@ -159,11 +160,12 @@ test('旧续期收尾不会拆开B会话正在进行的单飞续期', async () =
   client.setSession({ accessToken: 'session-A', role: 'admin' })
   const oldRefresh = client.refresh().catch(error => error)
   await oldStarted.promise
-  await client.login('B', 'demo')
-  const firstB = client.refresh()
-  await newStarted.promise
+  const login = client.login('B', 'demo')
   oldReply.release()
   expect(await oldRefresh).toMatchObject({ code: 'SESSION_CHANGED' })
+  await login
+  const firstB = client.refresh()
+  await newStarted.promise
   const secondB = client.refresh()
   newReply.release()
   expect(await Promise.all([firstB, secondB])).toEqual([
@@ -183,8 +185,9 @@ test('A退出请求完成时不会清除其间登录的B会话', async () => {
   client.setSession({ accessToken: 'session-A', role: 'admin' })
   const logout = client.logout()
   await started.promise
-  await client.login('B', 'demo')
+  const login = client.login('B', 'demo')
   reply.release()
   await logout
+  await login
   expect(client.getSession()).toEqual({ accessToken: 'session-B', role: 'viewer' })
 })

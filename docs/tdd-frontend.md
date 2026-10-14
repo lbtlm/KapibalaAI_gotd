@@ -64,3 +64,22 @@ Iris F3 revision1，仅 frontend/src/api/client.ts、client.test.ts 与本记录
 验证：23:52:45 auth/WS/login 三个文件共 11 项通过；23:53:27 修正测试的 unknown 错误断言后 9 项 auth 再次通过。最终 pnpm build（含 tsc --noEmit）通过，3254 modules；原有大 chunk 警告不属于本次 auth 范围。范围内 git diff --check 通过。稳定代码待主控提交及 Sentry 定向独立复查。
 
 用户已明确接受 F2 视觉方向：“沿用这版方向，继续完成验收”。视觉方向验收门已通过；这不代替剩余功能、恢复和真实资源验收。
+
+## F4 HttpOnly Cookie 请求顺序修复（2026-10-15）
+
+Iris F4 revision1，范围仅 ApiClient、受影响 auth 测试、新增 e2e/auth-cookies.spec.ts 与本记录。复用原请求入口、generation 与 refresh 单飞；没有改 UI、后端、布局或跨标签页机制。CodeGraph 查询了 auth 调用链后实施。
+
+F3 的 generation 只能拒绝迟到 JSON，不能撤销浏览器已应用的 Set-Cookie。新增一个同 ApiClient 的 HTTP 队列，仅串行 login/refresh/logout 的实际 Axios 请求；队列发出请求前检查所属 generation，失败也释放队列。401 后的 refresh 和 logout 重试发生在 HTTP 锁之外，避免递归锁死。队列不因登录/退出而重置，确保旧在途 Cookie 先落地，再由新登录或退出覆盖；陈旧排队请求直接 SESSION_CHANGED，不发到服务器。
+
+真实浏览器 TDD：自有临时端口 Node HTTP 服务加载实际 client.ts 的 TypeScript 编译结果和实际 Axios 浏览器包，用 headless Edge 原生 Cookie jar 验证 HttpOnly。不是 page.route/MSW Cookie 模拟，不使用业务数据库、真实账号或 API key。
+
+| 行为 | red（修复前） | green（修复后） |
+|---|---|---|
+| 挂起 A refresh 后发起 B login，最后再次 refresh 仍 B | Cookie 期望 B1，实际 A2；JS generation 虽拒绝旧响应，Cookie 已跨会话 | 最终 memory B1/viewer、Cookie B1；再次 refresh 发 Cookie B1，结果 B2/viewer |
+| 挂起 A refresh 后正常 logout | 退出后 Cookie 仍 A2 | Cookie 清空、session null；后续 refresh 401，登录 B 后续期仍 B |
+| 挂起 A refresh 后 expired-access logout | 退出后 Cookie 仍 A2 | 自动续期后重试撤销，两次 logout，最终退出；后续 B 仍 B，无死锁 |
+| 旧 logout 排队期间又发起 B login | 补充边界覆盖 | 旧 logout 返回 SESSION_CHANGED，服务器未收到 logout；队列继续完成 B 登录/续期 |
+
+首次真实浏览器三条用例均为上述 Cookie 断言失败，未将未启动业务栈计作 red。修复后独立 runner 四条全部通过（3.8s）。局部 runner 位于 frontend/.local/playwright-auth.config.ts，仅移除 webServer 并选 auth-cookies；正式 Playwright testDir 自动包含新用例，CI 原配置继续跑业务栈与该独立夹具。测试在 finally 释放阻塞响应、关闭 HTTP 服务，Playwright 管理浏览器生命周期。
+
+原 MSW 交错用例调整为先发起 B/退出 Promise，再释放挂起 A 响应，保留原身份、错误、单飞次数和新 session 断言，符合新的 HTTP 顺序。定向 Vitest auth/WS/login 共 11 项通过（00:16，9.49s）；真实 Cookie 浏览器 4 项通过。pnpm typecheck 与 pnpm build 均通过，3254 modules、构建 7.69s；原有 AntD 大 chunk 警告未扩展本轮范围。范围内 git diff --check 通过。未重跑全部业务 Go/浏览器或真实 Telegram。稳定快照仍需主控提交、独立复查和最终组合验收。
