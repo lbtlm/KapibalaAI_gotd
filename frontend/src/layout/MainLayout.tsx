@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState} from 'react'
-import {Layout,Menu,Button,Tag,Alert} from 'antd'
-import {UserOutlined,TeamOutlined,OrderedListOutlined,LogoutOutlined} from '@ant-design/icons'
+import {Layout,Menu,Button,Alert} from 'antd'
+import {UserOutlined,TeamOutlined,OrderedListOutlined,LogoutOutlined,ApiOutlined} from '@ant-design/icons'
 import {Outlet,useNavigate,useLocation} from 'react-router-dom'
 import {useQueryClient} from '@tanstack/react-query'
 import {api} from '../api/client'
@@ -29,6 +29,5 @@ export default function MainLayout(){
  },[cache])
  async function logout(){try{await api.logout()}finally{cache.clear();navigate('/login')}}
  const active=location.pathname.startsWith('/groups')||location.pathname.startsWith('/agent-runs')?'/groups':location.pathname.startsWith('/sequences')?'/sequences':'/accounts'
- return <Layout className={styles.layoutContainer}><Sider width={220} className={styles.sider}><span className={styles.logo}>Kapibala<small>消息操作台</small></span><Menu selectedKeys={[active]} onClick={({key})=>navigate(key)} items={[{key:'/accounts',icon:<UserOutlined/>,label:'服务账号'},{key:'/groups',icon:<TeamOutlined/>,label:'群组工作区'},{key:'/sequences',icon:<OrderedListOutlined/>,label:'定时序列'}]}/></Sider><Layout className={styles.mainLayout}><Header className={styles.header}><div><Tag color={connection==='connected'?'green':'gold'}>{connection==='connected'?'实时已连接':connection==='offline'?'实时已断开':'正在恢复连接'}</Tag><span>消息与运行状态</span></div><div><Tag>{session?.role==='admin'?'管理员':'只读观察员'}</Tag><Button icon={<LogoutOutlined/>} onClick={logout}>退出登录</Button></div></Header><Content className={styles.content}>{incident&&<Alert type="error" showIcon closable onClose={()=>setIncident(null)} title="状态一致性提醒" description={incident}/>}<Outlet/></Content></Layout></Layout>
+ return <Layout className={styles.layoutContainer}><Sider width={176} className={styles.sider}><div className={styles.sidebarInner}><span className={styles.logo}>Kapibala<small>消息台</small></span><Menu className={styles.nav} selectedKeys={[active]} onClick={({key})=>navigate(key)} items={[{key:'/accounts',icon:<UserOutlined/>,label:'服务账号'},{key:'/groups',icon:<TeamOutlined/>,label:'群组工作区'},{key:'/sequences',icon:<OrderedListOutlined/>,label:'定时序列'}]}/><div className={styles.sidebarFooter}><div className={styles.connection+' '+(connection==='connected'?styles.connectionConnected:'')}><ApiOutlined/>{connection==='connected'?'实时已连接':connection==='offline'?'实时已断开':'正在恢复连接'}</div><span>消息和运行自动同步</span></div></div></Sider><Layout className={styles.mainLayout}><Header className={styles.header}><div className={styles.headerTitle}><strong>消息操作台</strong><span>{active==='/accounts'?'服务账号':active==='/groups'?'群组工作区':'定时序列'}</span></div><div className={styles.headerAccount}><span>{session?.role==='admin'?'管理员':'只读观察员'}</span><Button type="text" icon={<LogoutOutlined/>} onClick={logout}>退出登录</Button></div></Header><Content className={styles.content}>{incident&&<Alert type="error" showIcon closable onClose={()=>setIncident(null)} title="状态一致性提醒" description={incident}/>}<Outlet/></Content></Layout></Layout>
 }
-

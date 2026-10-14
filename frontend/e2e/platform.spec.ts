@@ -14,10 +14,11 @@ test('真实栈 C3：登录 → 群 → 外部消息触发 Agent → 可查看�
  expect(chosen).toHaveLength(2)
  for(const account of chosen)if(account.status!=='online')await checked(await request.post(backend+'/api/accounts/'+account.id+'/connect',{headers}))
  const {jobId}=await checked<{jobId:string}>(await request.post(backend+'/api/groups',{headers,data:{creatorAccountId:chosen[0].id,memberAccountIds:[chosen[1].id]}}))
- await expect.poll(async()=>{const job=await checked<{status:string}>(await request.get(backend+'/api/jobs/'+jobId,{headers}));return job.status},{timeout:20000}).toBe('finished')
- const groups=await checked(await request.get(backend+'/api/groups',{headers})) as {id:string;gatewayGroupId:string;members:{accountId:string}[]}[]
- const group=groups.find(g=>g.members.some(m=>m.accountId===chosen[0].id))
- expect(group).toBeDefined()
+ let createdGroupId: string | undefined
+ await expect.poll(async()=>{const job=await checked<{status:string;groupId?:string}>(await request.get(backend+'/api/jobs/'+jobId,{headers}));createdGroupId=job.groupId;return job.status},{timeout:20000}).toBe('finished')
+ expect(createdGroupId,'本次成功建群任务必须返回关联群ID').toBeTruthy()
+ const group=await checked<{id:string;gatewayGroupId:string}>(await request.get(backend+'/api/groups/'+createdGroupId,{headers}))
+ expect(group.id).toBe(createdGroupId)
  await checked(await request.patch(backend+'/api/groups/'+group!.id,{headers,data:{agentEnabled:true}}))
  await page.goto('/login')
  await page.getByLabel('用户名').fill('admin');await page.getByLabel('密码',{exact:true}).fill('admin');await page.getByRole('button',{name:'登录',exact:true}).click()
@@ -44,7 +45,3 @@ test('真实栈 viewer没有写按钮，直接请求写API获得403',async({page
  const result=await request.post(backend+'/api/accounts/account-1/connect',{headers:{Authorization:'Bearer '+accessToken}})
  expect(result.status()).toBe(403);expect((await result.json()).error.code).toBe('FORBIDDEN')
 })
-
-
-
-
