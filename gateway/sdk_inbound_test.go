@@ -17,6 +17,85 @@ type subscriptionRemote struct {
 	requests chan int
 }
 
+type hashSubscriptionRemote struct {
+	*subscriptionRemote
+	hashes chan int64
+}
+
+func (r *hashSubscriptionRemote) Invoke(ctx context.Context, in bin.Encoder, out bin.Decoder) error {
+	if req, ok := in.(*tg.UpdatesGetChannelDifferenceRequest); ok {
+		select {
+		case r.hashes <- req.Channel.(*tg.InputChannel).AccessHash:
+		default:
+		}
+	}
+	return r.subscriptionRemote.Invoke(ctx, in, out)
+}
+
+func TestRealSDKBootstrapRepairsMissingChannelHashWithoutReplacingValidHash(t *testing.T) {
+	for _, mode := range []string{"absent-row", "positive-pts-missing-hash", "positive-pts-valid-hash"} {
+		t.Run(mode, func(t *testing.T) {
+			store := testPG(t)
+			remote := &remoteTelegram{messages: map[int64]int{}, globalDifference: &tg.UpdatesDifferenceEmpty{Date: 1700000000, Seq: 1}, peerTop: 1, history: []tg.MessageClass{&tg.Message{ID: 1, PeerID: &tg.PeerChannel{ChannelID: 321}, FromID: &tg.PeerUser{UserID: 90001}, Date: 1700000000, Message: "missing-hash-history"}}}
+			s, adapter, ts := updateTestService(t, store, store.DB, remote)
+			defer func() { ts.Close(); s.Close() }()
+			if _, e := store.ExecFenced(context.Background(), "DELETE FROM gateway_channel_state WHERE account_id=$1 AND user_id=$2 AND channel_id=$3", "account-1", 10001, 321); e != nil {
+				t.Fatal(e)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			script := &hashSubscriptionRemote{&subscriptionRemote{remote, make(chan int, 10)}, make(chan int64, 10)}
+			pipeline := adapter.Updates("account-1", tg.NewClient(script), cancel)
+			if e := pipeline.Storage.SetState(ctx, 10001, updates.State{Pts: 7, Date: 1700000000, Seq: 1}); e != nil {
+				t.Fatal(e)
+			}
+			expectedHash := int64(64)
+			if mode != "absent-row" {
+				if e := pipeline.Storage.SetChannelPts(ctx, 10001, 321, 80); e != nil {
+					t.Fatal(e)
+				}
+			}
+			if mode == "positive-pts-valid-hash" {
+				expectedHash = 72
+				if e := pipeline.AccessHasher.SetChannelAccessHash(ctx, 10001, 321, expectedHash); e != nil {
+					t.Fatal(e)
+				}
+			} else {
+				if _, found, e := pipeline.AccessHasher.GetChannelAccessHash(ctx, 10001, 321); e != nil || found {
+					t.Fatalf("fixture masks missing SDK hash: found=%v err=%v", found, e)
+				}
+			}
+			manager := updates.New(updates.Config{Handler: pipeline.Handler, Storage: pipeline.Storage, AccessHasher: pipeline.AccessHasher, OnChannelTooLong: pipeline.OnChannelTooLong})
+			ready := make(chan struct{})
+			done := make(chan error, 1)
+			go func() {
+				done <- pipeline.Run(ctx, manager, 10001, updates.AuthOptions{OnStart: func(context.Context) { close(ready) }})
+			}()
+			defer func() { cancel(); <-done }()
+			select {
+			case <-ready:
+			case <-time.After(2 * time.Second):
+				t.Fatal("manager failed readiness")
+			}
+			select {
+			case hash := <-script.hashes:
+				if hash != expectedHash {
+					t.Fatalf("subscription hash overwritten or missing: got%d want%d", hash, expectedHash)
+				}
+			case <-time.After(300 * time.Millisecond):
+				t.Fatal("reported ready but registered channel has no real SDK subscription")
+			}
+			if mode == "absent-row" {
+				assertMessageReplay(t, ts, "missing-hash-history")
+			}
+			marker := "post-initialization-inbound-" + mode
+			if e := manager.Handle(ctx, &tg.Updates{Updates: []tg.UpdateClass{&tg.UpdateNewChannelMessage{Message: &tg.Message{ID: 2, PeerID: &tg.PeerChannel{ChannelID: 321}, FromID: &tg.PeerUser{UserID: 90001}, Date: 1700000001, Message: marker}, Pts: 81, PtsCount: 1}}}); e != nil {
+				t.Fatal(e)
+			}
+			assertMessageReplay(t, ts, marker)
+		})
+	}
+}
+
 func (r *subscriptionRemote) Invoke(ctx context.Context, in bin.Encoder, out bin.Decoder) error {
 	if req, ok := in.(*tg.UpdatesGetChannelDifferenceRequest); ok {
 		select {

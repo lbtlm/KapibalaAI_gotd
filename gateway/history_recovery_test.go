@@ -50,6 +50,116 @@ func TestTooLongResumesAfterLastPersistedBatch(t *testing.T) {
 	}
 }
 
+func TestIncompleteRecoveryUsesCommittedRangeAfterOrdinaryInboundAdvancesMaximum(t *testing.T) {
+	for _, mode := range []string{"next-batch-failed", "membership-failed"} {
+		t.Run(mode, func(t *testing.T) {
+			store := testPG(t)
+			incoming := &tg.Message{ID: 159, PeerID: &tg.PeerChannel{ChannelID: 321}, FromID: &tg.PeerUser{UserID: 90001}, Date: 1700000000, Message: "ordinary-during-gap"}
+			remote := &remoteTelegram{messages: map[int64]int{}, peerTop: 205, globalDifference: &tg.UpdatesDifference{State: tg.UpdatesState{Pts: 90, Date: 1700000000, Seq: 1}, NewMessages: []tg.MessageClass{incoming}}, history: []tg.MessageClass{&tg.Message{ID: 1, PeerID: &tg.PeerChannel{ChannelID: 321}, FromID: &tg.PeerUser{UserID: 90001}, Date: 1700000000, Message: "first-committed-gap-message"}, &tg.Message{ID: 158, PeerID: &tg.PeerChannel{ChannelID: 321}, FromID: &tg.PeerUser{UserID: 90001}, Date: 1700000000, Message: "missing-158-before-maximum"}, incoming}}
+			s, adapter, ts := updateTestService(t, store, store.DB, remote)
+			pipeline := adapter.Updates("account-1", tg.NewClient(remote), func() {})
+			if e := pipeline.Storage.SetChannelPts(context.Background(), 10001, 321, 80); e != nil {
+				t.Fatal(e)
+			}
+			if e := pipeline.AccessHasher.SetChannelAccessHash(context.Background(), 10001, 321, 64); e != nil {
+				t.Fatal(e)
+			}
+			paused := make(chan struct{})
+			release := make(chan struct{})
+			pause := func(ctx context.Context) error {
+				close(paused)
+				select {
+				case <-release:
+					return errors.New("gap paused then failed")
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			if mode == "membership-failed" {
+				remote.peerTop = 100
+				remote.onParticipants = pause
+			} else {
+				remote.onHistory = func(ctx context.Context, req *tg.ChannelsGetMessagesRequest) error {
+					if req.ID[0].(*tg.InputMessageID).ID == 101 {
+						return pause(ctx)
+					}
+					return nil
+				}
+			}
+			pipeline.OnChannelTooLong(321)
+			select {
+			case <-paused:
+			case <-time.After(time.Second):
+				ts.Close()
+				s.Close()
+				t.Fatal("recovery did not pause after first committed batch")
+			}
+			if _, e := pipeline.API.UpdatesGetDifference(context.Background(), &tg.UpdatesGetDifferenceRequest{}); e != nil {
+				close(release)
+				ts.Close()
+				s.Close()
+				t.Fatal(e)
+			}
+			close(release)
+			deadline := time.Now().Add(time.Second)
+			for {
+				_, body := rpcCall(t, ts, "GET", "/groups/tg-321/recovery", nil)
+				if rec, ok := body["recovery"].(map[string]any); ok && rec["status"] == "blocked" && rec["throughId"] == float64(100) {
+					break
+				}
+				if time.Now().After(deadline) {
+					ts.Close()
+					s.Close()
+					t.Fatalf("gap did not persist original boundary: %v", body)
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			ts.Close()
+			s.Close()
+			store = testPG(t)
+			remote.onHistory = nil
+			remote.onParticipants = nil
+			remote.peerTop = 205
+			adapter = newTestRPCConnection(t, remote, store.DB)
+			var e error
+			s, e = New(context.Background(), Config{Mode: "fake", Store: store, Telegram: adapter})
+			if e != nil {
+				t.Fatal(e)
+			}
+			ts = httptest.NewServer(s)
+			defer func() { ts.Close(); s.Close() }()
+			pipeline = adapter.Updates("account-1", tg.NewClient(remote), func() {})
+			if pts, found, e := pipeline.Storage.GetChannelPts(context.Background(), 10001, 321); e != nil || !found || pts != 80 {
+				t.Fatalf("positive checkpoint fixture lost: pts%d found%v err%v", pts, found, e)
+			}
+			pipeline.OnChannelTooLong(321)
+			deadline = time.Now().Add(time.Second)
+			var body map[string]any
+			for {
+				_, body = rpcCall(t, ts, "GET", "/groups/tg-321/recovery", nil)
+				if rec, ok := body["recovery"].(map[string]any); ok && rec["status"] == "recovered_with_limits" {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("resumed gap failed: %v", body)
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			rec := body["recovery"].(map[string]any)
+			if rec["fromId"] != float64(1) || rec["throughId"] != float64(205) || rec["recoveredMessages"] != float64(2) || len(rec["unavailableIds"].([]any)) != 202 || rec["unavailableIds"].([]any)[0] != float64(2) {
+				t.Fatalf("ordinary max159 erased committed recovery evidence: %v", body)
+			}
+			assertMessageReplay(t, ts, "missing-158-before-maximum")
+			assertMessageReplay(t, ts, "ordinary-during-gap")
+			remote.mu.Lock()
+			defer remote.mu.Unlock()
+			if len(remote.historyRequests) != 3 || remote.historyRequests[1][0] != 101 {
+				t.Fatalf("resumed after max instead of checked boundary: %v", remote.historyRequests)
+			}
+		})
+	}
+}
+
 func TestGlobalGapMetadataFailureIsDurableAcrossReconstruction(t *testing.T) {
 	for _, mode := range []string{"no-record-rpc-failed", "completed-no-dialog"} {
 		t.Run(mode, func(t *testing.T) {

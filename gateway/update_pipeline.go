@@ -26,14 +26,26 @@ func (p *UpdatePipeline) Run(ctx context.Context, manager *updates.Manager, uid 
 	d := p.API.(*durableDifferenceAPI)
 	d.adapter.service.mu.Lock()
 	var channels []int64
+	knownHashes := map[int64]int64{}
 	for _, g := range d.adapter.service.state.Groups {
 		if g.AccessHashes[d.aid] != 0 {
 			channels = append(channels, g.ChannelID)
+			knownHashes[g.ChannelID] = g.AccessHashes[d.aid]
 		}
 	}
 	d.adapter.service.mu.Unlock()
 	sort.Slice(channels, func(i, j int) bool { return channels[i] < channels[j] })
 	for _, cid := range channels {
+		_, hashFound, e := p.AccessHasher.GetChannelAccessHash(ctx, uid, cid)
+		if e != nil {
+			return e
+		}
+		if !hashFound {
+			if e = p.AccessHasher.SetChannelAccessHash(ctx, uid, cid, knownHashes[cid]); e != nil {
+				d.gate.fail(e)
+				return e
+			}
+		}
 		_, found, e := p.Storage.GetChannelPts(ctx, uid, cid)
 		if e != nil {
 			return e

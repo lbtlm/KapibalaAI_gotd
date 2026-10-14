@@ -97,6 +97,10 @@ func (a *TelegramAdapter) recoverChannelRange(parent context.Context, aid string
 	if old := g.Recovery; old != nil && old.AccountID == aid && old.FromID == 1 && old.ThroughID > g.VerifiedHistoryThrough[aid] && old.ThroughID <= through {
 		g.VerifiedHistoryThrough[aid] = old.ThroughID
 	}
+	// A later ordinary update cannot replace an unfinished exact-ID range boundary.
+	if previous := g.Recovery; previous != nil && previous.AccountID == aid && previous.Status != "recovered_with_limits" && previous.FromID > 0 {
+		through = previous.ThroughID
+	}
 	if verifiedOnly {
 		through = g.VerifiedHistoryThrough[aid]
 	}
