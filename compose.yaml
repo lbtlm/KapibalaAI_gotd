@@ -1,0 +1,83 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: kapibala
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in an ignored .env file}
+      POSTGRES_DB: kapibala
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U kapibala -d kapibala']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    image: kapibala-backend:${CANDIDATE_SHA:-local}
+    build: ./backend
+    command: [/app/migrate]
+    environment:
+      DATABASE_URL: postgres://kapibala:${POSTGRES_PASSWORD}@postgres:5432/kapibala?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  gateway:
+    image: kapibala-gateway:${CANDIDATE_SHA:-local}
+    build: ./gateway
+    environment:
+      DATABASE_URL: postgres://kapibala:${POSTGRES_PASSWORD}@postgres:5432/kapibala?sslmode=disable
+      BIND_HOST: 0.0.0.0
+      PORT: 8081
+      GATEWAY_MODE: fake
+      GATEWAY_ADMIN_ENABLED: 'false'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  agent:
+    image: kapibala-backend:${CANDIDATE_SHA:-local}
+    build: ./backend
+    command: [/app/agent]
+    environment:
+      DATABASE_URL: postgres://kapibala:${POSTGRES_PASSWORD}@postgres:5432/kapibala?sslmode=disable
+      BIND_HOST: 0.0.0.0
+      PORT: 8082
+      AGENT_MODE: scripted
+      AGENT_ADMIN_ENABLED: 'false'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  backend:
+    image: kapibala-backend:${CANDIDATE_SHA:-local}
+    build: ./backend
+    environment:
+      DATABASE_URL: postgres://kapibala:${POSTGRES_PASSWORD}@postgres:5432/kapibala?sslmode=disable
+      GATEWAY_URL: http://gateway:8081
+      AGENT_URL: http://agent:8082
+      BIND_HOST: 0.0.0.0
+      PORT: 8080
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      gateway:
+        condition: service_started
+      agent:
+        condition: service_started
+
+  frontend:
+    image: kapibala-frontend:${CANDIDATE_SHA:-local}
+    build:
+      context: .
+      dockerfile: scripts/frontend.Dockerfile
+    ports:
+      - '127.0.0.1:${CONSOLE_PORT:-5173}:80'
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  postgres-data:

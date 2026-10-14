@@ -1,0 +1,24 @@
+# 前端复用记录
+
+源仓库只读：D:/web_projects/card_code_workspace/go_tg_assistant，源提交 1d7ca2240ec8c41650c27b4c7965baf84cf36a35。本轮先读源 root/frontend AGENTS，实际用 Copy-Item 拷贝下表文件，再原位精简适配。未导入源 .git、Session、生产配置、数据库备份或租户/支付/营销/WebA 模块。
+
+| 原文件（frontend 下） | 当前文件（frontend 下） | 必要适配 |
+|---|---|---|
+| src/main.tsx | src/main.tsx | 保留 React18 StrictMode / ReactDOM createRoot / RouterProvider / AntD App / QueryClientProvider，删租户/主题/聊天室桥和devtools，中文locale |
+| src/routes/index.tsx | src/routes/index.tsx | 保留 createBrowserRouter / Navigate，缩至登录、账号、群列表详情、Agent详情、序列；加入cookie恢复会话guard |
+| src/layout/MainLayout.tsx | src/layout/MainLayout.tsx | 保留 AntD Header/Sider/Content/Menu、Outlet/navigation骨架；删动态租户菜单/订阅/主题，改三入口与实时连接状态 |
+| src/layout/MainLayout.module.scss | src/layout/MainLayout.module.scss | 保留 scoped layout/sidebar/header/content类，按消息操作台调整密度、颜色tokens、时间线与审计阻塞 |
+| src/views/resources/account/components/AccountTableColumns.tsx | src/components/AccountTableColumns.tsx | 保留 ColumnsType建表、Typography/Space/Button模式，替换字符串账号ID与题目状态/合法按钮；删源订阅/删除/聊天/手机号逻辑 |
+| src/components/resource/StatusTag.tsx | src/components/StatusTag.tsx | 保留状态映射+AntD Tag模式，移除资源/代理旧映射，替换题目生命周期与发送/运行状态 |
+| src/saas/utils/api-client.ts | src/api/client.ts | 保留 axios实例、refreshPromise单飞、401只重试一次思路；删除localStorage token、refresh body、多路径配置和重复入口，改内存access/HttpOnly cookie；opaque token role来自服务端 |
+| src/vite-env.d.ts | src/vite-env.d.ts | 保留 Vite client类型入口；清除源业务环境变量契约（当前无前端密钥） |
+
+Vite、TS与package配置按源React18/Vite工具链重建最小依赖集，不复制源锁中的不相关模块。pnpm-lock.yaml为本项目真实解析依赖锁，保留版本来源。一个请求入口为 api.request；所有业务请求与登录续期均使用它。
+
+新增页面、Job反馈、GroupActions、ImportGroup、SequenceProgress、RealtimeClient和类型是题目没有现成等价模块的必要适配。认证、成员/消息/Agent/序列跨服务公共协议保持原题命名；GET groups/sequences裸数组，preview为POST群sequence-runs/preview。外部群主允许creatorAccountId为null。未加入i18n/主题切换/响应式功能。
+
+视觉方向：运营员核验消息、账号和审计结果；领域词为服务账号、成员角色、受理/发出、序列排期、审计阻塞、游标补拉。颜色来自纸白时间线、深蓝墨水、灰色元数据、绿色在线信号、黄色未知结果和红色阻塞。签名为每条消息左侧状态轨道与明确发送状态，并与Agent步骤/序列来源贯通。复用原操作台导航与组件，不增统计仪表盘。
+组件检查点共同遵循：焦点是当前任务状态/内容；白与冷灰的轻层次、细边界；Segoe UI与Microsoft YaHei区分30px标题、18px区域、14px正文、12px时间；4px节奏，面板24px、页面36px、sidebar220px，单一绿色主操作。native/AntD控制保留键盘与表单标签。
+
+截图为实际UI在headless Edge 1440px渲染，HTTP fixture明确为展示数据（不证明真实业务链）。位置 .local/frontend-visual/login.png、accounts.png、groups.png、agent.png、sequences.png。已逐图检查无空白/重叠/截断，阻塞运行强调padding已修正。截图数据不是Telegram真实资源。
+

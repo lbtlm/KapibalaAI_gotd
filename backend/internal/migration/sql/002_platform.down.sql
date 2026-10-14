@@ -1,0 +1,1 @@
+DROP TABLE agent_effects,agent_pending,agent_runs,sequence_steps,sequence_runs,sequences,message_snapshots,gateway_cursor,gateway_inbox,messages,jobs,members,groups,gateway_actions,ws_events,ws_clock,accounts;
