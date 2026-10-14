@@ -1,6 +1,6 @@
 # Implementation contract
 
-Revision 4, 2026-10-15 Asia/Shanghai. Owner: current controller. User approved implementation, copying reusable modules then adapting, private repository commits, OpenAI-compatible APIs with DeepSeek for real testing, TDD, complete testing and CI/CD. Target: deliver as soon as possible, within 24 hours where feasible. Do not change repository visibility.
+Revision 5, 2026-10-15 Asia/Shanghai. Owner: current controller. User approved implementation, copying reusable modules then adapting, private repository commits, OpenAI-compatible APIs with DeepSeek for real testing, TDD, complete testing and CI/CD. Target: deliver as soon as possible, within 24 hours where feasible. Do not change repository visibility. PR #1 is merged into dev; the subsequent requirements audit and next-day work are recorded in [the 2026-10-16 upgrade plan](upgrade-plan-2026-10-16.md).
 
 ## Sources and precedence
 
@@ -51,7 +51,7 @@ Controller started isolated PostgreSQL 16.11 at 127.0.0.1:55432, database kapiba
 
 User designated https://t.me/test_kapibala and authorized choosing three live test accounts from their supplied local test installation. Exact credential paths remain in ignored local configuration, never in committed docs. Source Sessions remain untouched; inspect auth using isolated copies. Further group mutations are limited to selected test accounts and the designated test group, with capability checks before attempting owner/admin-only actions. No unrelated members may be kicked.
 
-Provider docs verified 2026-10-14: https://api-docs.deepseek.com/guides/thinking_mode/ and https://api-docs.deepseek.com/ . DeepSeek tool turns using thinking require reasoning_content to be replayed; it must not be exposed as product UI text. The user has supplied the key in ignored local configuration. A real tool conversation and audit passed; combined Telegram/LLM acceptance remains pending.
+Provider docs verified 2026-10-14: https://api-docs.deepseek.com/guides/thinking_mode/ and https://api-docs.deepseek.com/ . DeepSeek tool turns using thinking require reasoning_content to be replayed; it must not be exposed as product UI text. The user has supplied the key in ignored local configuration. A real tool conversation and audit passed. The second combined Telegram/DeepSeek attempt passed on 2026-10-15: one incoming message, one run and one audited sent reply; the first failed attempt remains recorded. This does not cover real member removal, group creation or injected platform-failure windows; see the acceptance matrix.
 
 ## Git workflow (user confirmed)
 
