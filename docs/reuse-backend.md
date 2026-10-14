@@ -1,0 +1,25 @@
+# Backend reuse evidence
+
+Owner: Orion. Source repositories were read-only. No database backup, Session, production environment, .git directory or unrelated SaaS module was imported.
+
+| Source | Copied destination | Necessary adaptation |
+|---|---|---|
+| `D:/web_projects/card_code_workspace/go_follow_live/backend/internal/repository/repo_message.go`, approved source commit `00eb35a56ad1f4bf382e6e3906d35bacd1740376` | `backend/internal/platform/repo_message.go` | Physically copied first, then retained/adapted PostgreSQL `ON CONFLICT` deduplication and `FOR UPDATE SKIP LOCKED` dequeue patterns. Replaced follow-live task/user mappings with the required string identifiers, account FIFO, one durable message row, reconciliation and shared operator/Agent/sequence send path. Removed unrelated source operations. |
+| `D:/web_projects/card_code_workspace/go_tg_assistant/backend/internal/lib/migration/migration.go`, source commit `1d7ca2240ec8c41650c27b4c7965baf84cf36a35` | `backend/internal/migration/migration.go` | Physically copied first. Kept embedded-FS migration version/status management; removed unrelated rollback/force/printing entrypoints. Added explicit `cmd/migrate`, startup schema refusal and demo-only seed in `entry.go`. Startup never auto-applies migrations. |
+
+Original file SHA256 values, read before finalization:
+
+- Message source: `C8F2EDAC824766A0B3EDC7B6C02511A2EB385AF4C447A70EBDCA815CA057FE26`.
+- Migration source: `CF68418AEBE7B99CDD768E4B2262E91D1767B73269181E8D9BE1AF3D54BFE414`.
+
+The inspected `gin_saas_auth` JWT service depends on that repository's configuration/models and includes unrelated SaaS/JWKS concerns. It was not copied. Opaque random access/refresh tokens, hashed in PostgreSQL and tied to one revocable session family, directly implement immediate logout and refresh replay revocation without Redis or a second key-management subsystem.
+
+The new code supplies examination-specific behavior not present in the copied modules: six-state CAS and terminal transactions; durable create/leave jobs; outbox plus unknown-result reconciliation; conservative SSE inbox/cursor; transactionally ordered WS event log; immutable message-page snapshots; Agent checkpoint/epoch/effect state and audited tool protocol; inherited sequence variables and sent-event-relative scheduling. Session advisory locks cancel their worker context on connection loss, while Agent writes/effect claims also check a persisted execution epoch. Lock keys are scoped to the PostgreSQL schema so test schemas cannot block unrelated business instances.
+
+The standalone provider is required by the user's OpenAI-compatible DeepSeek choice. It stores request-hash responses and the original assistant/tool context before replying. Chat Completions preserves `reasoning_content`; Responses preserves complete reasoning/function-call items, including encrypted reasoning for stateless replay. The key stays in provider configuration. The protocol boundary remains the examination's four tool blocks; no Anthropic service is used. References: [DeepSeek thinking mode](https://api-docs.deepseek.com/guides/thinking_mode/) and [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling).
+
+Recovery extension agreed with Niko: backend group creation passes optional `idempotencyKey=jobId`; gateway persists the corresponding group identity so a hard interruption after remote creation can recover without creating another group. Member `role` is a compatible gateway extension used to verify existing-group imports. Imported external members retain `accountId=null` and their real roles. Only selected online service accounts are mapped and eligible for actions; an external owner never receives a fabricated service identity.
+
+B2 extends the existing gateway kick request with optional `idempotencyKey=runId:toolUseId`. The original actor/target/key are stored in the existing Agent effect row; no new business API or migration is needed. Completed gateway keys replay their durable result even after rejoin or actor disconnection; parameter changes conflict and ambiguous gateway effects remain fail closed. This replaces membership-based recovery and its 14-second blind retry. Existing audited intents also recover before policy checks for new tools, so policy changes do not misreport an already-completed original step.
+
+Other B2 changes are in-place: the copied SQL inbox path now executes only an ordered eligible prefix, the existing account send worker runs separate accounts concurrently while retaining FIFO locks, and sequence accepted updates cannot overwrite sent. The existing budget clock uses one necessary shared session-presence connection per worker instance to distinguish real all-instance downtime from startup alongside a live peer. Its old two-second inference is removed. The existing sequence recovery also covers sent-before-advance checkpoints. Public HTTP and actual process-kill evidence is recorded in `docs/tdd-backend.md`; full final-candidate CI and independent review remain controller-owned.
