@@ -108,4 +108,4 @@ pnpm --dir frontend test:e2e
 
 开发分支全部 PR 到 `dev`，验收后单独 `dev` → `main`；固定 required check 为 `CI Gate`。流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。CI 构建绑定 SHA 的镜像，在专用 Compose 项目中验证三个服务健康、前端页面/资源和登录，再打包镜像与 SHA256 清单；受控手动流程复用同一产物。尚未宣称生产部署、Release 或标签发布。
 
-PR #1 已合入 `dev`。合并后的需求查漏、已定位的边界问题及明日优先级见 [2026-10-16 升级计划](docs/upgrade-plan-2026-10-16.md)；既有 CI 通过不代表新发现的场景已经验证。
+PR #1 已合入 `dev`。合并后的需求查漏、已定位的边界问题及 10 月 15 日白天优先级见 [2026-10-15 白天工作计划](docs/upgrade-plan-2026-10-15.md)；既有 CI 通过不代表新发现的场景已经验证。

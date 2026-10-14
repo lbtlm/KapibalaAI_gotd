@@ -1,6 +1,6 @@
 # Implementation contract
 
-Revision 5, 2026-10-15 Asia/Shanghai. Owner: current controller. User approved implementation, copying reusable modules then adapting, private repository commits, OpenAI-compatible APIs with DeepSeek for real testing, TDD, complete testing and CI/CD. Target: deliver as soon as possible, within 24 hours where feasible. Do not change repository visibility. PR #1 is merged into dev; the subsequent requirements audit and next-day work are recorded in [the 2026-10-16 upgrade plan](upgrade-plan-2026-10-16.md).
+Revision 5, 2026-10-15 Asia/Shanghai. Owner: current controller. User approved implementation, copying reusable modules then adapting, private repository commits, OpenAI-compatible APIs with DeepSeek for real testing, TDD, complete testing and CI/CD. Target: deliver as soon as possible, within 24 hours where feasible. Do not change repository visibility. PR #1 is merged into dev; the subsequent requirements audit and daytime work are recorded in [the 2026-10-15 daytime work plan](upgrade-plan-2026-10-15.md).
 
 ## Sources and precedence
 
