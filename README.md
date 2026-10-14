@@ -104,6 +104,6 @@ pnpm --dir frontend test:e2e
 
 已有服务会在本地被 Playwright 复用；最终验收应停止旧候选并启动待验收版本。CI 每次使用全新 PostgreSQL 和自身服务。真实 Telegram、真实 LLM 与人工界面验收分别记录，fake/单元/CI 通过不代表这些外部验收通过。
 
-实现与证据状态见 [development-status.md](docs/development-status.md)，各组件 TDD/reuse 文档见 `docs/tdd-*.md`、`docs/reuse-*.md`。可选 C2 provider 接入和 C3 浏览器测试已提供；C1 媒体持久化不在当前核心范围，gateway 媒体端点返回 404。真实 Telegram 的服务器原时间戳为秒，模拟契约为毫秒。真实平台无法保证网关规范中的两秒故障收敛，未知外部效果会保持待核实而不盲目重复。
+需求、真实验收与限制见 [验收矩阵](docs/验收矩阵.md)，协作状态见 [development-status.md](docs/development-status.md)，各组件 TDD/reuse 文档见 `docs/tdd-*.md`、`docs/reuse-*.md`。可选 C2 provider 接入和 C3 浏览器测试已提供；C1 媒体持久化不在当前核心范围，gateway 媒体端点返回 404。真实 Telegram 的服务器原时间戳为秒，模拟契约为毫秒。真实平台无法保证网关规范中的两秒故障收敛，未知外部效果会保持待核实而不盲目重复。
 
 开发分支全部 PR 到 `dev`，验收后单独 `dev` → `main`；固定 required check 为 `CI Gate`。流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。CI 构建绑定 SHA 的镜像，在专用 Compose 项目中验证三个服务健康、前端页面/资源和登录，再打包镜像与 SHA256 清单；受控手动流程复用同一产物。尚未宣称生产部署、Release 或标签发布。
