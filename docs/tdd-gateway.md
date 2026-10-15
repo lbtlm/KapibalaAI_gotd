@@ -321,3 +321,14 @@ Red：原 POST /groups/import 仅接受 username，有效 tg-ID 在账号验证�
 Red: `TestIncomingStickerRetainsMediaInEvent` 实际转换纯 Telegram 更新后仅有空text，mediaUrl/kind/MIME丢失。Green: 同一测试和 `TestMediaFormatsPreserveFileLocation`（race）通过，保留photo最大尺寸、文件位置、WebP/TGS/WebM贴纸类型；下载复用已有账号并按DC取文件，原固定404处理被替换。纯输入转换不伪造平台RPC成功。主控独立检查锁释放、取消与无登录行为。
 
 R32现场只读验证：schema12迁移完成，当前Telegram群历史TGS贴纸（8244字节）和MP4（169847字节）真实下载成功；随后同群新收到的MP4也完成下载。浏览器TGS生成SVG动画，两个视频均解码为720×540、时长约1.84秒；1366×900、800×768、640×768无外层滚动溢出，pageerror=0、业务写请求=0。C3更新后再次1 passed。现场内容/截图只在ignored ui-r32，不进入Git。
+
+## R35 Gateway 包整理（2026-10-16）
+
+用户要求在推广 main 前整理 gateway，由主控独立实施与复核。沿用既有实现，移动服务及同包测试到 `internal/gateway`，从原 `session.go` 提取只读格式转换到 `internal/session`、SDK Session 存储到 `internal/storage`；更新游标存储也移入 storage，既有 `internal/ops` 保持不变。storage 通过已有 ExecFenced 约定和只读 Err 接口使用写入围栏与入站失败状态，不反向依赖服务。账号事务、业务快照、锁顺序、SQL、HTTP/SSE/JSON 和命令入口不变；没有根目录转发壳或第二套实现。
+
+- 基线：专用临时 PostgreSQL 的 `kapibala_gateway_refactor_test`，`node scripts/go-test.mjs gateway` 通过（6.716s）；84 个测试/子测试执行项。
+- 包迁移 RED：先将现有 Session 行为测试移入目标包，`go test ./internal/session` 报 `no non-test Go files`；这是新包尚未实现的接线失败，不是业务缺陷。
+- GREEN：实现提取后，`node scripts/go-test.mjs gateway -race` 通过（服务包 10.531s、Session 包 1.154s），执行项集合与基线完全相同，没有测试被删除或跳过。storage 的实际读写、删除后的迟到更新和 writer 围栏仍由服务集成测试验证。
+- `go vet ./...`、`go build -o ../.local/gateway-refactor-bin/ ./cmd/...` 通过；gateway / adopt / probe 三个入口均可构建。测试跳过守卫 4 项通过，`git diff --check` 通过。
+
+只使用隔离空库及结构性输入，不登录 Telegram、不发送消息、不调用真实模型、不重启现有演示服务。源码内的导入路径已更新；上方历史测试命令中的 `go test .` 对应现路径 `go test ./internal/gateway`，Session 两项对应 `./internal/session`。后续发布 PR 另按仓库门禁执行 full CI，不能用本地 gateway 结果代替全栈发布证据。

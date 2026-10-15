@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	sdkstorage "github.com/lbtlm/KapibalaAI_gotd/gateway/internal/storage"
 	"io"
 	"log/slog"
 	"net/http"
@@ -155,7 +156,7 @@ func (s *Service) operationContext(parent context.Context) (context.Context, fun
 		return nil, func() {}, err
 	}
 	if s.ctx.Err() != nil {
-		return nil, func() {}, ErrWriterLeaseLost
+		return nil, func() {}, sdkstorage.ErrWriterLeaseLost
 	}
 	leaseCtx, leaseCancel := context.WithTimeout(context.WithoutCancel(parent), 2*time.Second)
 	stopLease := context.AfterFunc(s.ctx, leaseCancel)
@@ -163,7 +164,7 @@ func (s *Service) operationContext(parent context.Context) (context.Context, fun
 	stopLease()
 	leaseCancel()
 	if err != nil {
-		if errors.Is(err, ErrWriterLeaseLost) {
+		if errors.Is(err, sdkstorage.ErrWriterLeaseLost) {
 			s.cancel()
 		}
 		return nil, func() {}, err
@@ -176,7 +177,7 @@ func (s *Service) operationContext(parent context.Context) (context.Context, fun
 	if s.ctx.Err() != nil {
 		cancel()
 		stop()
-		return nil, func() {}, ErrWriterLeaseLost
+		return nil, func() {}, sdkstorage.ErrWriterLeaseLost
 	}
 	return ctx, func() { stop(); cancel() }, nil
 }
@@ -192,7 +193,7 @@ func (s *Service) watchLease() {
 			ctx, cancel := context.WithTimeout(s.ctx, 2*time.Second)
 			err := s.store.CheckLease(ctx)
 			cancel()
-			if errors.Is(err, ErrWriterLeaseLost) {
+			if errors.Is(err, sdkstorage.ErrWriterLeaseLost) {
 				s.cancel()
 				return
 			}

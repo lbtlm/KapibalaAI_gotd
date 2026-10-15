@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
-	gateway "github.com/lbtlm/KapibalaAI_gotd/gateway"
+	gateway "github.com/lbtlm/KapibalaAI_gotd/gateway/internal/gateway"
 	"log/slog"
 	"os"
 )

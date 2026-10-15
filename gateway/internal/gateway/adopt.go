@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	sessionimport "github.com/lbtlm/KapibalaAI_gotd/gateway/internal/session"
 	"strconv"
 	"strings"
 )
@@ -51,7 +52,7 @@ func (p *PostgresStore) AdoptAccounts(ctx context.Context, configs []AccountConf
 		if e != nil || pid <= 0 {
 			return 0, &APIError{409, "ADOPT_EXISTING_IDENTITY_REQUIRED", 0}
 		}
-		source, e := ImportSession(c.SessionPath, c.SessionFormat, c.Passcode)
+		source, e := sessionimport.ImportSession(c.SessionPath, c.SessionFormat, c.Passcode)
 		if e != nil {
 			return 0, &APIError{409, "ADOPT_SOURCE_UNAVAILABLE", 0}
 		}

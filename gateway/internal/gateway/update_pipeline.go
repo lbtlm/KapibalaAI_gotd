@@ -5,6 +5,7 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/updates"
 	"github.com/gotd/td/tg"
+	sdkstorage "github.com/lbtlm/KapibalaAI_gotd/gateway/internal/storage"
 	"sort"
 	"sync"
 	"time"
@@ -69,9 +70,9 @@ func (p *UpdatePipeline) Run(ctx context.Context, manager *updates.Manager, uid 
 // Updates constructs this account's SDK API, durable storage and event handler.
 func (a *TelegramAdapter) Updates(aid string, api *tg.Client, cancel context.CancelFunc) *UpdatePipeline {
 	gate := &ingestGate{cancel: cancel}
-	storage := updateStorage{db: a.db, id: aid, owner: a.service.store, gate: gate}
+	storage := sdkstorage.UpdateState{DB: a.db, AccountID: aid, Owner: a.service.store, Gate: gate}
 	handler := telegram.UpdateHandlerFunc(func(ctx context.Context, u tg.UpdatesClass) error {
-		if e := gate.err(); e != nil {
+		if e := gate.Err(); e != nil {
 			return e
 		}
 		s := a.service
@@ -116,7 +117,7 @@ type ingestGate struct {
 	gaps    map[int64]bool
 }
 
-func (g *ingestGate) err() error { g.mu.Lock(); defer g.mu.Unlock(); return g.failure }
+func (g *ingestGate) Err() error { g.mu.Lock(); defer g.mu.Unlock(); return g.failure }
 func (g *ingestGate) fail(e error) {
 	g.mu.Lock()
 	if g.failure == nil {

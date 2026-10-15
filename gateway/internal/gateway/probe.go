@@ -7,6 +7,7 @@ import (
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
 	"github.com/lbtlm/KapibalaAI_gotd/gateway/internal/ops"
+	sdkstorage "github.com/lbtlm/KapibalaAI_gotd/gateway/internal/storage"
 	"time"
 )
 
@@ -38,7 +39,7 @@ func probeAccounts(ctx context.Context, db *sql.DB, configs []AccountConfig, use
 	results := make([]ProbeResult, 0, len(configs))
 	for _, c := range configs {
 		r := ProbeResult{AccountID: c.ID}
-		storage := dbSession{db, c.ID}
+		storage := sdkstorage.Session{DB: db, AccountID: c.ID}
 		if _, e := storage.LoadSession(ctx); e != nil {
 			r.Code = "SESSION_STORAGE_FAILED"
 			results = append(results, r)

@@ -3,10 +3,11 @@ package gateway_test
 import (
 	"context"
 	"errors"
+	sdkstorage "github.com/lbtlm/KapibalaAI_gotd/gateway/internal/storage"
 	"testing"
 	"time"
 
-	gateway "github.com/lbtlm/KapibalaAI_gotd/gateway"
+	gateway "github.com/lbtlm/KapibalaAI_gotd/gateway/internal/gateway"
 )
 
 func TestCancelledStoreOperationDoesNotRetireHealthyWriter(t *testing.T) {
@@ -85,7 +86,7 @@ func TestTimedOutDatabaseIOStillRetiresWriter(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	_, err := p.ExecFenced(ctx, "SELECT pg_sleep(2)")
-	if !errors.Is(err, gateway.ErrWriterLeaseLost) {
+	if !errors.Is(err, sdkstorage.ErrWriterLeaseLost) {
 		t.Fatalf("uncertain database I/O must retire the writer, got %v", err)
 	}
 	request(t, server, "GET", "/health", nil, 503)

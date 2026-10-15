@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	sdkstorage "github.com/lbtlm/KapibalaAI_gotd/gateway/internal/storage"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -113,8 +114,8 @@ func TestPostgresDeletedAccountRejectsLateSDKStorageWrites(t *testing.T) {
 	if err = p.RegisterAccount(ctx, c, data, registration{fingerprint, configFingerprint(c)}); err != nil {
 		t.Fatal(err)
 	}
-	storage := dbSession{p.DB, c.ID}
-	stateStorage := updateStorage{db: p.DB, id: c.ID, owner: p}
+	storage := sdkstorage.Session{DB: p.DB, AccountID: c.ID}
+	stateStorage := sdkstorage.UpdateState{DB: p.DB, AccountID: c.ID, Owner: p}
 	if err = storage.StoreSession(ctx, data); err != nil {
 		t.Fatal(err)
 	}

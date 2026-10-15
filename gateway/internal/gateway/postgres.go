@@ -7,12 +7,10 @@ import (
 	"errors"
 	"fmt"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	sdkstorage "github.com/lbtlm/KapibalaAI_gotd/gateway/internal/storage"
 	"log/slog"
 	"sync"
 )
-
-// ErrWriterLeaseLost requires a process restart before further gateway effects.
-var ErrWriterLeaseLost = errors.New("gateway PostgreSQL writer lease lost")
 
 // PostgresStore owns one gateway writer lease and persists atomic snapshots.
 // The gateway has one active platform client per account, so a second writer
@@ -67,7 +65,7 @@ func (p *PostgresStore) Load(ctx context.Context) ([]byte, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.lost {
-		return nil, ErrWriterLeaseLost
+		return nil, sdkstorage.ErrWriterLeaseLost
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -83,7 +81,7 @@ func (p *PostgresStore) Save(ctx context.Context, b []byte) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.lost {
-		return ErrWriterLeaseLost
+		return sdkstorage.ErrWriterLeaseLost
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -107,7 +105,7 @@ func (p *PostgresStore) CheckLease(ctx context.Context) error {
 }
 func (p *PostgresStore) checkLeaseLocked(ctx context.Context) error {
 	if p.lost {
-		return ErrWriterLeaseLost
+		return sdkstorage.ErrWriterLeaseLost
 	}
 	// Waiting for another fenced write can consume the caller's deadline.
 	// No SQL was attempted: cancellation says nothing about lease ownership.
@@ -154,7 +152,7 @@ func (p *PostgresStore) loseLease(operation string, err error) error {
 		cause = "connection_closed"
 	}
 	slog.Error("gateway writer lease lost", "operation", operation, "cause", cause)
-	return fmt.Errorf("%w: %s", ErrWriterLeaseLost, cause)
+	return fmt.Errorf("%w: %s", sdkstorage.ErrWriterLeaseLost, cause)
 }
 func (p *PostgresStore) Close() error {
 	if p.lease != nil {

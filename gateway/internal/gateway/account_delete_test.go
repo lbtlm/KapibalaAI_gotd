@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	gateway "github.com/lbtlm/KapibalaAI_gotd/gateway"
+	gateway "github.com/lbtlm/KapibalaAI_gotd/gateway/internal/gateway"
 )
 
 func TestPostgresDeleteRetiresIdentityAndPreservesOtherData(t *testing.T) {

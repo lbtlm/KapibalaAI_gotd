@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	sessionimport "github.com/lbtlm/KapibalaAI_gotd/gateway/internal/session"
 	"net/http"
 	"os"
 	"strings"
@@ -153,7 +154,7 @@ func (s *Service) registerHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	converted, err := ImportSession(path, "TelethonSQLite", "")
+	converted, err := sessionimport.ImportSession(path, "TelethonSQLite", "")
 	if err != nil {
 		fail(w, &APIError{400, "INVALID_SESSION", 0})
 		return

@@ -11,6 +11,7 @@ import (
 	"github.com/gotd/td/telegram/updates"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
+	sdkstorage "github.com/lbtlm/KapibalaAI_gotd/gateway/internal/storage"
 	"log/slog"
 	"strings"
 	"sync"
@@ -212,7 +213,7 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (pid string, e
 	connectCtx, connectCancel := context.WithTimeout(ctx, 30*time.Second)
 	stopRun := context.AfterFunc(runCtx, connectCancel)
 	defer func() { stopRun(); connectCancel() }()
-	storage := dbSession{a.db, id}
+	storage := sdkstorage.Session{DB: a.db, AccountID: id}
 	if _, err := storage.LoadSession(connectCtx); err != nil {
 		if connectCtx.Err() != nil {
 			return "", connectCtx.Err()
@@ -237,7 +238,7 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (pid string, e
 			s.self = self
 			return pipeline.Run(live, manager, self.ID, updates.AuthOptions{IsBot: self.Bot, OnStart: func(context.Context) { ready <- nil }})
 		})
-		if failure := pipeline.gate.err(); failure != nil {
+		if failure := pipeline.gate.Err(); failure != nil {
 			err = failure
 		}
 		select {
@@ -273,7 +274,7 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (pid string, e
 		return stringID(s.self.ID), nil
 	case <-connectCtx.Done():
 		cancel()
-		if failure := pipeline.gate.err(); failure != nil {
+		if failure := pipeline.gate.Err(); failure != nil {
 			return "", platformError(failure)
 		}
 		return "", &APIError{504, "NETWORK_TIMEOUT", 0}

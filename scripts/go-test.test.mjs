@@ -4,7 +4,7 @@ import {allowedSkip} from './go-test.mjs';
 
 const platform = 'github.com/lbtlm/KapibalaAI_gotd/backend/internal/platform';
 const provider = 'github.com/lbtlm/KapibalaAI_gotd/backend/internal/provider';
-const gateway = 'github.com/lbtlm/KapibalaAI_gotd/gateway';
+const gateway = 'github.com/lbtlm/KapibalaAI_gotd/gateway/internal/gateway';
 
 test('gateway tests have no dormant helper skip exemption', () => {
   const helper = {Package:gateway,Test:'TestGatewayCrashChild'};

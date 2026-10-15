@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	sessionimport "github.com/lbtlm/KapibalaAI_gotd/gateway/internal/session"
 	"os"
 	"path/filepath"
 	"testing"
 
-	gateway "github.com/lbtlm/KapibalaAI_gotd/gateway"
+	gateway "github.com/lbtlm/KapibalaAI_gotd/gateway/internal/gateway"
 )
 
 func legacyAccount(t *testing.T, p *gateway.PostgresStore, id string, seed byte) gateway.AccountConfig {
@@ -17,7 +18,7 @@ func legacyAccount(t *testing.T, p *gateway.PostgresStore, id string, seed byte)
 	if err := os.WriteFile(path, structuralSession(t, seed), 0600); err != nil {
 		t.Fatal(err)
 	}
-	data, err := gateway.ImportSession(path, "TelethonSQLite", "")
+	data, err := sessionimport.ImportSession(path, "TelethonSQLite", "")
 	if err != nil {
 		t.Fatal(err)
 	}
