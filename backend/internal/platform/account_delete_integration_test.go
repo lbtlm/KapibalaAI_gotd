@@ -183,7 +183,13 @@ func TestAccountDeleteAndLeaveAdmissionSerializeAgainstRealEmptyGateway(t *testi
 				t.Fatalf("admitted job unavailable: %d %v", status, body)
 			}
 			if scenario == "leave_wins" {
-				if deleted.status != 409 || deleted.body["error"].(map[string]any)["code"] != "ACCOUNT_IN_USE" || deleted.body["error"].(map[string]any)["reason"] != "active_job" {
+				// Leave admission marks the group ending in the same transaction;
+				// managed-group ownership is checked before active jobs on delete.
+				var groupStatus string
+				if e = pool.QueryRow(context.Background(), `SELECT status FROM groups WHERE id=$1`, group).Scan(&groupStatus); e != nil || groupStatus != "ending" {
+					t.Fatalf("admitted leave did not retain an ending group: status=%s error=%v", groupStatus, e)
+				}
+				if deleted.status != 409 || deleted.body["error"].(map[string]any)["code"] != "ACCOUNT_IN_USE" || deleted.body["error"].(map[string]any)["reason"] != "managed_group" {
 					t.Fatalf("DELETE passed an admitted leave task: %d %v", deleted.status, deleted.body)
 				}
 			} else if deleted.status != 204 {
