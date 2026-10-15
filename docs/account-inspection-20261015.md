@@ -54,3 +54,13 @@ Revision 4: the following names are frozen for this batch. Preserve existing acc
 - `POST /api/account-groups/move` `{accountIds:string[],groupId:null|string}` -> `{updated:number}`; validate whole selection and transact atomically.
 
 Group CRUD/account moves and import/check/sync/connect/disconnect attempts produce account logs where an account exists. Display labels may be localized by frontend. No new settings panel or general-purpose job framework.
+
+## Follow-up inspection: real local runtime and result feedback
+
+The user reported missing profile fields and an empty joined-group list after successful checks on the local Docker console. The running gateway was still the simulator; a simulated success does not establish Telegram identity or membership. The existing real adapter already provides Self and complete joined-group enumeration. Keep the simulator default for isolated tests, and use an ignored local runtime override with an independent Telegram gateway database for the designated service accounts. Preserve source Session copies, credentials and local backups outside Git and bind the designated inputs read-only.
+
+Before switching the local console, complete existing disconnect intents and verify the backend event cursor/inbox are empty; otherwise use separately isolated backend state rather than reusing an unrelated event stream. The October15 switch preserved account/log history, backed up the database and left the third external test account outside the service manifest. This is a local acceptance environment, not production deployment.
+
+Group feedback must distinguish no previous sync, a successful sync returning zero groups, and a failed attempt retaining the prior successful result. Operation-result tags reuse the existing readable success/failure status palette. Missing Telegram usernames remain unavailable rather than being inferred from account IDs or names.
+
+Real acceptance on the two designated service accounts passed connection, profile check, group synchronization and persisted rereads. The accounts returned2 groups (administrator1/member1) and5 groups (member5), respectively; both returned verified phone/profile identity, neither returned a username. Business groups remained unchanged. This evidence covers read-only Telegram account/group discovery, not outgoing messages, joining, moderation, real LLM behavior or forced MTProto failure recovery.
