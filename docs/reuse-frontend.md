@@ -22,3 +22,8 @@ Vite、TS与package配置按源React18/Vite工具链重建最小依赖集，不�
 
 截图为实际UI在headless Edge 1440px渲染，HTTP fixture明确为展示数据（不证明真实业务链）。位置 .local/frontend-visual/login.png、accounts.png、groups.png、agent.png、sequences.png。已逐图检查无空白/重叠/截断，阻塞运行强调padding已修正。截图数据不是Telegram真实资源。
 
+
+
+F15 attempt1 revision1（2026-10-15）：在既有 Sequences 的 inspect/start mutation 原位绑定 groupId/input/revision，请求和确认复用同一快照；替代旧成功回调读取可变 group 的路径。服务器 active run 优先，原 runId 改为含所属群的最后运行结果，替代长期覆盖当前运行的选择逻辑。复用原 SequenceProgress、React Query 失效及 MainLayout WS 入口，没有第二套进度/重连模块。新增 PreflightSnapshot 类型用于跨预检/确认保存一次用户输入，revision 用于拒绝已被输入变更淘汰的响应；没有新增业务 API。
+
+B4 复用现有实际栈 Playwright、HTTP 准备和 fake 网关注入；将 C3 建群代码提为同文件 createTestGroup 供 C3/B4 共用，原路径已替换，没有保留重复实现。仅新增覆盖缺失验收窗口的浏览器用例，WS transport fault 转发真实服务消息，不 mock HTTP。Playwright 的 Vite 启动端口原位随 E2E_BASE_URL 选择，默认仍 5173。未复制新仓库模块、未增加依赖、框架或视觉方向。红绿及 3 秒唯一性证据见 tdd-frontend.md 的 F15。
