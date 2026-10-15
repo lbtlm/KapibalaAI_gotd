@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"database/sql"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/updates"
 	"github.com/gotd/td/tg"
@@ -70,10 +69,7 @@ func (p *UpdatePipeline) Run(ctx context.Context, manager *updates.Manager, uid 
 // Updates constructs this account's SDK API, durable storage and event handler.
 func (a *TelegramAdapter) Updates(aid string, api *tg.Client, cancel context.CancelFunc) *UpdatePipeline {
 	gate := &ingestGate{cancel: cancel}
-	owner, _ := a.service.store.(interface {
-		ExecFenced(context.Context, string, ...any) (sql.Result, error)
-	})
-	storage := updateStorage{db: a.db, id: aid, owner: owner, gate: gate}
+	storage := updateStorage{db: a.db, id: aid, owner: a.service.store, gate: gate}
 	handler := telegram.UpdateHandlerFunc(func(ctx context.Context, u tg.UpdatesClass) error {
 		if e := gate.err(); e != nil {
 			return e

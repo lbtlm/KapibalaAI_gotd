@@ -22,9 +22,6 @@ type group struct {
 	Members                map[string]bool   `json:"members"`
 	Admins                 map[string]bool   `json:"admins"`
 	Invite                 string            `json:"invite"`
-	InviteReady            time.Time         `json:"inviteReady"`
-	InviteExpired          bool              `json:"inviteExpired"`
-	Writable               bool              `json:"writable"`
 	ChannelID              int64             `json:"channelId"`
 	AccessHashes           map[string]int64  `json:"accessHashes"`
 	MemberRoles            map[string]string `json:"memberRoles"`
@@ -55,35 +52,6 @@ type message struct {
 	Text     string    `json:"text"`
 	SentAt   time.Time `json:"sentAt"`
 }
-type job struct {
-	Kind       string         `json:"kind"`
-	Due        time.Time      `json:"due"`
-	GroupID    string         `json:"groupId"`
-	AccountID  string         `json:"accountId"`
-	PlatformID string         `json:"platformId"`
-	ClientID   string         `json:"clientId"`
-	Text       string         `json:"text"`
-	Code       string         `json:"code"`
-	Data       map[string]any `json:"data,omitempty"`
-	EffectID   string         `json:"effectId,omitempty"`
-}
-
-// Fault controls one explicitly enabled fake failure, optionally scoped.
-type Fault struct {
-	Operation         string `json:"operation"`
-	AccountID         string `json:"accountId,omitempty"`
-	GroupID           string `json:"groupId,omitempty"`
-	Code              string `json:"code"`
-	Count             int    `json:"count"`
-	RetryAfterSeconds int    `json:"retryAfterSeconds,omitempty"`
-	SettleAfterMs     int    `json:"settleAfterMs,omitempty"`
-	Effect            bool   `json:"effect"`
-}
-type delivery struct {
-	Duplicate       bool `json:"duplicate"`
-	Reorder         bool `json:"reorder"`
-	DisconnectAfter int  `json:"disconnectAfter"`
-}
 type effect struct {
 	ID        string    `json:"id"`
 	RandomID  int64     `json:"randomId"`
@@ -104,22 +72,13 @@ type state struct {
 	Groups      map[string]*group   `json:"groups"`
 	Messages    []message           `json:"messages"`
 	Events      []Event             `json:"events"`
-	Jobs        []job               `json:"jobs"`
-	Faults      []Fault             `json:"faults"`
-	Delivery    delivery            `json:"delivery"`
 	Effects     map[string]*effect  `json:"effects"`
 	SeenUpdates map[string]bool     `json:"seenUpdates"`
-	NextID      int64               `json:"nextId"`
 	NextEvent   int64               `json:"nextEvent"`
 	CreateKeys  map[string]string   `json:"createKeys"`
-
-	Registrations map[string]registration `json:"registrations,omitempty"`
 }
 
 func initialState() state {
 	s := state{Accounts: map[string]*account{}, Groups: map[string]*group{}, Effects: map[string]*effect{}, SeenUpdates: map[string]bool{}, CreateKeys: map[string]string{}}
-	for i, id := range []string{"account-1", "account-2", "account-3"} {
-		s.Accounts[id] = &account{PlatformID: stringID(10001 + int64(i)), Status: "idle"}
-	}
 	return s
 }

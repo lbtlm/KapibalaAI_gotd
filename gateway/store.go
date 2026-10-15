@@ -4,37 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"sync"
 	"time"
 )
 
-// Store is durable state storage. Production uses PostgreSQL; memory is a test seam.
-type Store interface {
-	Load(context.Context) ([]byte, error)
-	Save(context.Context, []byte) error
-	Close() error
-}
-
-// MemoryStore is an isolated, restartable test store, never used by the entrypoint.
-type MemoryStore struct {
-	mu   sync.Mutex
-	data []byte
-}
-
-// NewMemoryStore creates isolated protocol-test storage.
-func NewMemoryStore() *MemoryStore { return &MemoryStore{} }
-func (m *MemoryStore) Load(context.Context) ([]byte, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return append([]byte(nil), m.data...), nil
-}
-func (m *MemoryStore) Save(_ context.Context, b []byte) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.data = append([]byte(nil), b...)
-	return nil
-}
-func (*MemoryStore) Close() error { return nil }
 func (s *Service) save(ctx context.Context) error {
 	b, e := json.Marshal(s.state)
 	if e != nil {

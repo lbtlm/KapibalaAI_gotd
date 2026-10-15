@@ -15,6 +15,11 @@ import (
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	mode := os.Getenv("GATEWAY_MODE")
+	if mode != "" && mode != "telegram" {
+		slog.Error("GATEWAY_MODE must be telegram; simulation is no longer supported")
+		os.Exit(1)
+	}
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		slog.Error("DATABASE_URL required")
@@ -25,32 +30,17 @@ func main() {
 		slog.Error("open gateway store", "error", e)
 		os.Exit(1)
 	}
-	mode := os.Getenv("GATEWAY_MODE")
-	if mode == "" {
-		mode = "fake"
+	adapter, e := gateway.NewTelegramAdapter(ctx, store.DB)
+	if e != nil {
+		slog.Error("configure Telegram adapter")
+		store.Close()
+		os.Exit(1)
 	}
-	cfg := gateway.Config{Mode: mode, Store: store, AdminEnabled: os.Getenv("GATEWAY_ADMIN_ENABLED") == "true"}
-	if mode == "telegram" {
-		var configs []gateway.AccountConfig
-		if path := os.Getenv("TELEGRAM_ACCOUNTS_FILE"); path != "" {
-			configs, e = gateway.LoadAccountConfigs(path)
-		}
-		if e != nil {
-			slog.Error("read private Telegram account manifest")
-			store.Close()
-			os.Exit(1)
-		}
-		adapter, e := gateway.NewTelegramAdapter(ctx, store.DB, configs)
-		if e != nil {
-			slog.Error("configure Telegram adapter", "error", e)
-			store.Close()
-			os.Exit(1)
-		}
-		cfg.Telegram = adapter
-	}
+	cfg := gateway.Config{Store: store, Telegram: adapter}
 	service, e := gateway.New(ctx, cfg)
 	if e != nil {
 		slog.Error("start gateway", "error", e)
+		adapter.Close()
 		store.Close()
 		os.Exit(1)
 	}
@@ -73,7 +63,7 @@ func main() {
 		defer c()
 		_ = server.Shutdown(shutdown)
 	}()
-	slog.Info("gateway listening", "port", port, "mode", mode)
+	slog.Info("gateway listening", "port", port, "mode", "telegram")
 	if e = server.ListenAndServe(); e != nil && !errors.Is(e, http.ErrServerClosed) {
 		slog.Error("gateway HTTP server", "error", e)
 		os.Exit(1)

@@ -20,10 +20,6 @@ func (s *Service) importHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.cfg.Telegram == nil {
-		fail(w, &APIError{400, "TELEGRAM_MODE_REQUIRED", 0})
-		return
-	}
 	for _, id := range in.AccountIDs {
 		if e := s.accountError(id, true); e != nil {
 			fail(w, e)
@@ -345,7 +341,7 @@ func (a *TelegramAdapter) createGroup(ctx context.Context, aid string, in input,
 func (a *TelegramAdapter) registerCreated(aid, key string, ch *tg.Channel, s *Service) any {
 	gid := "tg-" + stringID(ch.ID)
 	pid := s.state.Accounts[aid].PlatformID
-	s.state.Groups[gid] = &group{Owner: aid, Members: map[string]bool{pid: true}, Admins: map[string]bool{}, Writable: true, ChannelID: ch.ID, AccessHashes: map[string]int64{aid: ch.AccessHash}, MemberRoles: map[string]string{pid: "creator"}}
+	s.state.Groups[gid] = &group{Owner: aid, Members: map[string]bool{pid: true}, Admins: map[string]bool{}, ChannelID: ch.ID, AccessHashes: map[string]int64{aid: ch.AccessHash}, MemberRoles: map[string]string{pid: "creator"}}
 	if key != "" {
 		s.state.CreateKeys[key] = gid
 		s.state.Effects["create:"+key].State = "sent"
@@ -389,7 +385,7 @@ func (a *TelegramAdapter) importGroup(ctx context.Context, in input, s *Service)
 		gid = current
 		g := s.state.Groups[gid]
 		if g == nil {
-			g = &group{Members: map[string]bool{}, Admins: map[string]bool{}, Writable: true, ChannelID: channel.ID, AccessHashes: map[string]int64{}, MemberRoles: map[string]string{}}
+			g = &group{Members: map[string]bool{}, Admins: map[string]bool{}, ChannelID: channel.ID, AccessHashes: map[string]int64{}, MemberRoles: map[string]string{}}
 			s.state.Groups[gid] = g
 		}
 		g.AccessHashes[aid] = channel.AccessHash

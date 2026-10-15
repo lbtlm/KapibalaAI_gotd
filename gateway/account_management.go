@@ -2,13 +2,10 @@ package gateway
 
 import (
 	"bytes"
-	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"os"
-	"sort"
 	"strings"
 )
 
@@ -79,16 +76,6 @@ func optionalString(v string) *string {
 	return &v
 }
 
-func (s *Service) registrationConflict(id string, identity registration) bool {
-	for other, old := range s.state.Registrations {
-		if other == id && old != identity || other != id && old.Authorization == identity.Authorization {
-			return true
-		}
-	}
-	_, exists := s.state.Registrations[id]
-	return !exists && s.state.Accounts[id] != nil && s.cfg.Mode != "telegram"
-}
-
 func (s *Service) registerHTTP(w http.ResponseWriter, r *http.Request) {
 	var in registerInput
 	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 24<<20))
@@ -130,9 +117,7 @@ func (s *Service) registerHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := AccountConfig{ID: in.AccountID, APIID: in.APIID, APIHash: strings.ToLower(in.APIHash), DeviceModel: in.DeviceModel, SystemVersion: in.SystemVersion, AppVersion: in.AppVersion}
-	b, _ := json.Marshal(c)
-	configHash := sha256.Sum256(b)
-	identity := registration{authorization, hex.EncodeToString(configHash[:])}
+	identity := registration{authorization, configFingerprint(c)}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	opCtx, stop, err := s.operationContext(r.Context())
@@ -141,25 +126,11 @@ func (s *Service) registerHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer stop()
-	if s.state.Registrations == nil {
-		s.state.Registrations = map[string]registration{}
-	}
-	if s.registrationConflict(in.AccountID, identity) {
-		fail(w, &APIError{409, "ACCOUNT_IMPORT_CONFLICT", 0})
-		return
-	}
-	if a, ok := s.cfg.Telegram.(interface {
-		Register(context.Context, AccountConfig, []byte, registration) error
-	}); ok {
-		s.mu.Unlock()
-		err = a.Register(opCtx, c, converted, identity)
-		s.mu.Lock()
-		if err != nil {
-			fail(w, err)
-			return
-		}
-	} else if s.cfg.Mode == "telegram" {
-		fail(w, &APIError{503, "GATEWAY_UNAVAILABLE", 0})
+	s.mu.Unlock()
+	err = s.cfg.Telegram.Register(opCtx, c, converted, identity)
+	s.mu.Lock()
+	if err != nil {
+		fail(w, err)
 		return
 	}
 	commitCtx, finish, err := s.operationContext(opCtx)
@@ -168,20 +139,8 @@ func (s *Service) registerHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer finish()
-	if s.state.Registrations == nil {
-		s.state.Registrations = map[string]registration{}
-	}
-	if s.registrationConflict(in.AccountID, identity) {
-		fail(w, &APIError{409, "ACCOUNT_IMPORT_CONFLICT", 0})
-		return
-	}
-	s.state.Registrations[in.AccountID] = identity
 	if s.state.Accounts[in.AccountID] == nil {
-		platformID := ""
-		if s.cfg.Mode == "fake" {
-			platformID = "fake-" + identity.Authorization[:16]
-		}
-		s.state.Accounts[in.AccountID] = &account{Status: "idle", PlatformID: platformID}
+		s.state.Accounts[in.AccountID] = &account{Status: "idle"}
 	}
 	s.commitHTTP(w, r.WithContext(commitCtx), 200, map[string]string{"accountId": in.AccountID, "status": "idle"}, nil)
 }
@@ -204,51 +163,21 @@ func (s *Service) inspectHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	if f := s.consumeFault(op, id, ""); f != nil {
-		s.commitHTTP(w, r, 0, nil, s.accountFailure(id, faultError(f)))
+	connectionID := s.state.Accounts[id].ConnectionID
+	s.mu.Unlock()
+	out, err := s.cfg.Telegram.Inspect(opCtx, id, op)
+	s.mu.Lock()
+	if e := opCtx.Err(); e != nil {
+		fail(w, e)
 		return
 	}
-	var out any
-	if a, ok := s.cfg.Telegram.(interface {
-		Inspect(context.Context, string, string) (any, error)
-	}); ok {
-		connectionID := s.state.Accounts[id].ConnectionID
-		s.mu.Unlock()
-		out, err = a.Inspect(opCtx, id, op)
-		s.mu.Lock()
-		if e := opCtx.Err(); e != nil {
-			fail(w, e)
-			return
-		}
-		if current := s.state.Accounts[id]; current == nil || current.ConnectionID != connectionID {
-			fail(w, &APIError{409, "CONNECTION_ENDED", 0})
-			return
-		}
-		if e := s.accountError(id, true); e != nil {
-			fail(w, e)
-			return
-		}
-	} else if s.cfg.Mode == "telegram" {
-		err = &APIError{503, "GATEWAY_UNAVAILABLE", 0}
-	} else if op == "check" {
-		acct := s.state.Accounts[id]
-		out = AccountProfile{Source: "simulated", PlatformUserID: acct.PlatformID, Username: optionalString(strings.ReplaceAll(id, "-", "_")), FirstName: optionalString("Test"), LastName: optionalString(id)}
-	} else {
-		items := []JoinedGroup{}
-		acct := s.state.Accounts[id]
-		for gid, g := range s.state.Groups {
-			if g.Members[acct.PlatformID] {
-				role := "member"
-				if g.Owner == id {
-					role = "creator"
-				} else if g.Admins[id] {
-					role = "admin"
-				}
-				items = append(items, JoinedGroup{ID: gid, Title: gid, Type: "supergroup", Role: role})
-			}
-		}
-		sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
-		out = map[string]any{"items": items}
+	if current := s.state.Accounts[id]; current == nil || current.ConnectionID != connectionID {
+		fail(w, &APIError{409, "CONNECTION_ENDED", 0})
+		return
+	}
+	if e := s.accountError(id, true); e != nil {
+		fail(w, e)
+		return
 	}
 	if opCtx.Err() != nil {
 		fail(w, opCtx.Err())

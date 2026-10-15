@@ -7,8 +7,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"github.com/gotd/td/session"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/updates"
 	"github.com/gotd/td/tg"
@@ -42,66 +40,54 @@ type TelegramAdapter struct {
 }
 
 // NewTelegramAdapter validates configuration without opening or connecting sessions.
-func NewTelegramAdapter(ctx context.Context, db *sql.DB, configs []AccountConfig) (*TelegramAdapter, error) {
+func NewTelegramAdapter(ctx context.Context, db *sql.DB) (*TelegramAdapter, error) {
 	lifetime, cancel := context.WithCancel(ctx)
 	a := &TelegramAdapter{ctx: lifetime, cancel: cancel, db: db, configs: map[string]AccountConfig{}, sessions: map[string]*onlineSession{}}
-	for _, c := range configs {
-		if c.ID == "" || c.APIID <= 0 || c.APIHash == "" || c.SessionPath == "" {
-			cancel()
-			return nil, errors.New("invalid Telegram account configuration")
-		}
-		if _, ok := a.configs[c.ID]; ok {
-			cancel()
-			return nil, errors.New("duplicate Telegram account id")
-		}
-		a.configs[c.ID] = c
+	if db == nil {
+		cancel()
+		return nil, errors.New("Telegram database required")
 	}
-	if db != nil {
-		rows, err := db.QueryContext(ctx, "SELECT config FROM gateway_account_configs")
-		if err != nil {
+	rows, err := db.QueryContext(ctx, "SELECT account_id,config FROM gateway_account_configs")
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var b []byte
+		var c AccountConfig
+		if err = rows.Scan(&id, &b); err == nil {
+			err = json.Unmarshal(b, &c)
+		}
+		if err != nil || c.ID != id || !validDurableConfig(c) {
 			cancel()
-			return nil, err
+			return nil, errors.New("invalid durable Telegram configuration; restore credentials without overwriting existing data")
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var b []byte
-			var c AccountConfig
-			if err = rows.Scan(&b); err != nil {
-				cancel()
-				return nil, err
-			}
-			if err = json.Unmarshal(b, &c); err != nil {
-				cancel()
-				return nil, err
-			}
-			if old, ok := a.configs[c.ID]; ok && (old.APIID != c.APIID || old.APIHash != c.APIHash) {
-				cancel()
-				return nil, errors.New("conflicting persisted Telegram account configuration")
-			}
-			a.configs[c.ID] = c
-		}
-		if err = rows.Err(); err != nil {
-			cancel()
-			return nil, err
-		}
+		a.configs[id] = c
+	}
+	if err = rows.Err(); err != nil {
+		cancel()
+		return nil, err
 	}
 	return a, nil
 }
 
-// Bind connects incoming platform updates to the durable public event log.
-func (a *TelegramAdapter) Bind(s *Service) {
-	a.service = s
-	go func() { <-s.ctx.Done(); a.cancel() }()
+// Bind keeps persisted accounts intact and refuses missing durable credentials.
+func (a *TelegramAdapter) Bind(s *Service) error {
 	for id := range s.state.Accounts {
 		if _, ok := a.configs[id]; !ok {
-			delete(s.state.Accounts, id)
+			return errors.New("account lacks durable Telegram configuration; run offline adopt or reupload credentials")
 		}
 	}
+	a.service = s
+	go func() { <-s.ctx.Done(); a.cancel() }()
 	for id := range a.configs {
 		if s.state.Accounts[id] == nil {
 			s.state.Accounts[id] = &account{Status: "idle"}
 		}
 	}
+	return nil
 }
 
 // Resume reconnects persisted online aliases and resumes their existing send intents.
@@ -177,16 +163,8 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (string, error
 		return "", &APIError{404, "ACCOUNT_NOT_FOUND", 0}
 	}
 	storage := dbSession{a.db, id}
-	if _, err := storage.LoadSession(ctx); errors.Is(err, session.ErrNotFound) {
-		b, e := ImportSession(c.SessionPath, c.SessionFormat, c.Passcode)
-		if e != nil {
-			return "", fmt.Errorf("isolated session import: %w", e)
-		}
-		if e = storage.StoreSession(ctx, b); e != nil {
-			return "", e
-		}
-	} else if err != nil {
-		return "", err
+	if _, err := storage.LoadSession(ctx); err != nil {
+		return "", &APIError{503, "CREDENTIALS_INCOMPLETE", 0}
 	}
 	runCtx, cancel := context.WithCancel(a.ctx)
 	var manager *updates.Manager
