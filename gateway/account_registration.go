@@ -2,10 +2,30 @@ package gateway
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+
+	"github.com/gotd/td/session"
 )
+
+func authorizationFingerprint(ctx context.Context, data []byte) (string, error) {
+	memory := &session.StorageMemory{}
+	if err := memory.StoreSession(ctx, data); err != nil {
+		return "", err
+	}
+	auth, err := (&session.Loader{Storage: memory}).Load(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(auth.AuthKey) != 256 {
+		return "", errors.New("invalid authorization key length")
+	}
+	fingerprint := sha256.Sum256(auth.AuthKey)
+	return hex.EncodeToString(fingerprint[:]), nil
+}
 
 // RegisterAccount commits imported authorization and configuration together on
 // the connection that owns the writer lease. Existing Sessions are never updated.
@@ -65,6 +85,27 @@ func (a *TelegramAdapter) Register(ctx context.Context, c AccountConfig, data []
 	})
 	if !ok {
 		return &APIError{503, "GATEWAY_UNAVAILABLE", 0}
+	}
+	// Static aliases use the same manager but predate the import registry. Prefer
+	// renewed database authorization; an original manifest file may no longer exist.
+	for _, existing := range a.configs {
+		if existing.SessionPath == "" {
+			continue
+		}
+		stored, err := (dbSession{a.db, existing.ID}).LoadSession(ctx)
+		if errors.Is(err, session.ErrNotFound) {
+			stored, err = ImportSession(existing.SessionPath, existing.SessionFormat, existing.Passcode)
+		}
+		if err != nil {
+			return &APIError{503, "GATEWAY_UNAVAILABLE", 0}
+		}
+		fingerprint, err := authorizationFingerprint(ctx, stored)
+		if err != nil {
+			return &APIError{503, "GATEWAY_UNAVAILABLE", 0}
+		}
+		if fingerprint == identity.Authorization {
+			return &APIError{409, "ACCOUNT_IMPORT_CONFLICT", 0}
+		}
 	}
 	if err := owner.RegisterAccount(ctx, c, data, identity); err != nil {
 		return err

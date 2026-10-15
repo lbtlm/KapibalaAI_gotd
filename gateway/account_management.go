@@ -10,8 +10,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-
-	"github.com/gotd/td/session"
 )
 
 type registerInput struct {
@@ -126,17 +124,15 @@ func (s *Service) registerHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, &APIError{400, "INVALID_SESSION", 0})
 		return
 	}
-	memory := &session.StorageMemory{}
-	_ = memory.StoreSession(r.Context(), converted)
-	auth, err := (&session.Loader{Storage: memory}).Load(r.Context())
+	authorization, err := authorizationFingerprint(r.Context(), converted)
 	if err != nil {
 		fail(w, &APIError{400, "INVALID_SESSION", 0})
 		return
 	}
 	c := AccountConfig{ID: in.AccountID, APIID: in.APIID, APIHash: strings.ToLower(in.APIHash), DeviceModel: in.DeviceModel, SystemVersion: in.SystemVersion, AppVersion: in.AppVersion}
 	b, _ := json.Marshal(c)
-	authHash, configHash := sha256.Sum256(auth.AuthKey), sha256.Sum256(b)
-	identity := registration{hex.EncodeToString(authHash[:]), hex.EncodeToString(configHash[:])}
+	configHash := sha256.Sum256(b)
+	identity := registration{authorization, hex.EncodeToString(configHash[:])}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	opCtx, stop, err := s.operationContext(r.Context())

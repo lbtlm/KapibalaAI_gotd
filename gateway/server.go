@@ -92,6 +92,13 @@ func New(parent context.Context, c Config) (*Service, error) {
 		return nil, errors.New("gateway database mode differs from GATEWAY_MODE; use separate databases")
 	}
 	s.state.Mode = c.Mode
+	// Pre-generation online snapshots have no incarnation shared with the backend.
+	// Persist offline before Resume; only a later explicit connect may assign an ID.
+	for _, account := range s.state.Accounts {
+		if account.Status == "online" && account.ConnectionID == "" {
+			account.Status = "offline"
+		}
+	}
 	if binder, ok := c.Telegram.(interface{ Bind(*Service) }); ok {
 		binder.Bind(s)
 	}
