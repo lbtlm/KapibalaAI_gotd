@@ -2,6 +2,7 @@ import {useEffect,useRef,useState} from 'react'
 import {useMutation,useQuery,useQueryClient} from '@tanstack/react-query'
 import {Button,Form,Input,Modal,Select,Space,Table} from 'antd'
 import {api} from '../api/client'
+import {invalidateAccountState} from '../api/account-cache'
 import type {Account,AccountGroup,AccountStatus} from '../types'
 import {buildAccountTableColumns,type AccountAction} from '../components/AccountTableColumns'
 import {LoadState} from '../components/Feedback'
@@ -20,8 +21,8 @@ export default function Accounts(){
  const [groupsOpen,setGroupsOpen]=useState(false),[moveOpen,setMoveOpen]=useState(false),[selected,setSelected]=useState<React.Key[]>([]),[moveForm]=Form.useForm()
  const query=useQuery({queryKey:['accounts'],queryFn:()=>api.request<Account[]>('/api/accounts')})
  const groups=useQuery({queryKey:['account-groups'],queryFn:()=>api.request<AccountGroup[]>('/api/account-groups')})
- const move=useMutation({mutationFn:(groupId:string|null)=>api.request('/api/account-groups/move','POST',{accountIds:selected,groupId}),onSuccess:async()=>{setSelected([]);setMoveOpen(false);await Promise.all([cache.invalidateQueries({queryKey:['accounts']}),cache.invalidateQueries({queryKey:['account-groups']}),cache.invalidateQueries({queryKey:['account']}),cache.invalidateQueries({queryKey:['account-logs']})])}})
- const action=useMutation({mutationFn:({account,to}:{account:Account;to:AccountAction})=>to==='check'?api.request('/api/accounts/'+account.id+'/check','POST',{connectIfNeeded:account.status!=='online'}):api.request('/api/accounts/'+account.id+'/transition','POST',{to,expectedFrom:account.status}),onSettled:async()=>{await Promise.all([cache.invalidateQueries({queryKey:['accounts']}),cache.invalidateQueries({queryKey:['account']}),cache.invalidateQueries({queryKey:['account-logs']})])}})
+ const move=useMutation({mutationFn:(groupId:string|null)=>api.request('/api/account-groups/move','POST',{accountIds:selected,groupId}),onSuccess:async()=>{setSelected([]);setMoveOpen(false);await Promise.all([invalidateAccountState(cache),cache.invalidateQueries({queryKey:['account-groups']})])}})
+ const action=useMutation({mutationFn:({account,to}:{account:Account;to:AccountAction})=>to==='check'?api.request('/api/accounts/'+account.id+'/check','POST',{connectIfNeeded:account.status!=='online'}):api.request('/api/accounts/'+account.id+'/transition','POST',{to,expectedFrom:account.status}),onSettled:()=>invalidateAccountState(cache)})
  useEffect(()=>{const node=table.current;if(!node)return;const measure=()=>{if(node.clientHeight)setHeight(Math.max(180,node.clientHeight-112))};const observer=new ResizeObserver(measure);observer.observe(node);measure();return()=>observer.disconnect()},[])
  const accounts=query.data??[],needle=search.trim().replace(/^@/,'').toLowerCase()
  const filtered=accounts.filter(a=>(!needle||[a.id,a.phone,a.username,a.platformUserId].some(v=>v?.toLowerCase().includes(needle)))&&(!group||(group==='ungrouped'?!a.groupId:a.groupId===group))&&(!status||a.status===status))

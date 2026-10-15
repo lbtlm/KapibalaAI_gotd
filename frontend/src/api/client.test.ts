@@ -21,6 +21,20 @@ function barrier() {
   const promise = new Promise<void>(resolve => { release = resolve })
   return { promise, release }
 }
+
+test('业务401原样返回且不续期、不重放、不清除Web登录',async()=>{
+ let requests=0,refreshes=0
+ server.use(
+  http.post('http://localhost/api/protected-resource',()=>{requests++;return HttpResponse.json({error:{code:'SESSION_EXPIRED',message:'credential expired'}},{status:401})}),
+  http.post('http://localhost/api/auth/refresh',()=>{refreshes++;return HttpResponse.json({accessToken:'renewed',role:'admin'})})
+ )
+ const client=new ApiClient('http://localhost')
+ client.setSession({accessToken:'web-session',role:'admin'})
+ await expect(client.request('/api/protected-resource','POST',{value:'one-operation'})).rejects.toMatchObject({status:401,code:'SESSION_EXPIRED'})
+ expect(requests).toBe(1)
+ expect(refreshes).toBe(0)
+ expect(client.getSession()).toEqual({accessToken:'web-session',role:'admin'})
+})
 test('旧会话写请求的迟到401不会在登录B后使用B身份重放', async () => {
   const started = barrier(), reply = barrier()
   const writes: (string | null)[] = []

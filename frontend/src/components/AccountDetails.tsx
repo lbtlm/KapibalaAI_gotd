@@ -2,6 +2,7 @@ import {useState} from 'react'
 import {useInfiniteQuery,useMutation,useQuery,useQueryClient} from '@tanstack/react-query'
 import {Alert,Button,Descriptions,Modal,Select,Space,Table,Tabs,Tag,Typography} from 'antd'
 import {api} from '../api/client'
+import {invalidateAccountState} from '../api/account-cache'
 import type {Account,AccountGroup,AccountLogPage,JoinedGroups} from '../types'
 import {accountName,type AccountAction} from './AccountTableColumns'
 import {LoadState} from './Feedback'
@@ -16,7 +17,7 @@ export default function AccountDetails({id,groups,writable,busy,error,onAction,o
  const account=useQuery({queryKey:['account',id],queryFn:()=>api.request<Account>('/api/accounts/'+encodeURIComponent(id))})
  const joined=useQuery({queryKey:['account-joined-groups',id],queryFn:()=>api.request<JoinedGroups>('/api/accounts/'+encodeURIComponent(id)+'/joined-groups'),enabled:tab==='groups'})
  const logs=useInfiniteQuery({queryKey:['account-logs',id,actionFilter,result],initialPageParam:'',queryFn:({pageParam})=>{const params=new URLSearchParams();if(pageParam)params.set('cursor',pageParam);if(actionFilter)params.set('action',actionFilter);if(result)params.set('result',result);return api.request<AccountLogPage>('/api/accounts/'+encodeURIComponent(id)+'/logs?'+params)},getNextPageParam:r=>r.nextCursor??undefined,enabled:tab==='logs'})
- const sync=useMutation({mutationFn:()=>api.request<JoinedGroups>('/api/accounts/'+encodeURIComponent(id)+'/joined-groups/sync','POST'),onSuccess:r=>cache.setQueryData(['account-joined-groups',id],r),onSettled:()=>cache.invalidateQueries({queryKey:['account-logs',id]})})
+ const sync=useMutation({mutationFn:()=>api.request<JoinedGroups>('/api/accounts/'+encodeURIComponent(id)+'/joined-groups/sync','POST'),onSuccess:r=>cache.setQueryData(['account-joined-groups',id],r),onSettled:()=>invalidateAccountState(cache)})
  const a=account.data,online=a?.status==='online',terminal=a&&['suspended','session_expired'].includes(a.status)
  const logItems=logs.data?.pages.flatMap(p=>p.items)??[]
  const groupsEmpty=joined.data?.lastSyncedAt?'最近一次同步未发现已加入的群组。':joined.isError?'所在群加载失败，请重试。':'尚未同步所在群。'

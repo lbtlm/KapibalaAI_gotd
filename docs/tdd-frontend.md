@@ -185,3 +185,23 @@ I19真实空栈定向验收补充：主控提供全新两独立PG库，通过Pla
 首轮已通过三个布局宽度，在退出按钮exact accessible-name定位等待；主动停止后只改两处退出selector允许既有图标名称，未改产品或timeout。最终截图位于empty-system-final-results/empty-system-真实空系统登录后引导上传真实账号，桌面账号工作区填满可用宽度/empty-accounts-{1366,1920,2560}.png；看图1366/2560无溢出、重叠或右侧限宽空区。截图是实际空系统，不含虚构身份或真实PII。Playwright结束后准确核对自有可执行路径和监听端口，remainingOwnedProcesses=0、remainingListeners=0，记录empty-final-summary.json，附实际本次二进制hash；未接触Docker5173。该视觉来自源码Vite，最终生产镜像视觉由主控另验。
 
 S19结束后按主控授权只补两条既有日志映射：legacy_verification_reset“历史检测结果已重置”、legacy_cached_groups_unverified“历史群缓存待核验”；`pnpm --dir frontend typecheck`再次通过（types-final-mapping.log），没有重复unit/build/E2E。映射后的productionbuild与5173终验由主控负责。源码/测试/本人记录冻结，SUBMITTED。
+
+## I20 v1：业务401误重放与同步后的账号状态（2026-10-15）
+
+Iris · 前端工程师，沿用Sol High，Fast未暴露；唯一修改frontend和本TDD记录，无Git、部署、递归委派、真实账号/凭据读取或5173业务操作。先读diagnosing-bugs并CodeGraph定位，再按磁盘确认调用链；本轮不改样式或恢复已删除的账号/网关替身。
+
+公开red-capable反馈：先把ApiClient三处相同401判断原样提到同文件isWebAuthFailure，保持旧行为；`pnpm --dir frontend exec vitest run src/api/auth-failure.test.ts --reporter=verbose`的纯status/code输入回归实际2failed/3passed，401 SESSION_EXPIRED被判断为Web登录失效（auth-red.log）。这不是终态账号或网关响应替身。pnpm在失败测试后另输出递归命令提示，真实red依据是Vitest已执行并给出的断言差异，不是该包装提示。
+
+red后向主控报告三个可证伪假设：1业务401走refresh/replay清session分支；2sync失败只刷新日志使列表/详情留旧；3WS/focus/详情旧对象导致广泛不同步。主控真实只读日志显示SESSION_EXPIRED后约20ms又check ILLEGAL_TRANSITION；Orion确认Web auth401只用UNAUTHORIZED，终态SESSION_EXPIRED为401、ACCOUNT_SUSPENDED为403。该证据与原ApiClient分支吻合。第三假设没有额外证据：详情保存ID并由query取当前对象；check/transition已有onSettled刷新；WS账号事件刷新且认证重连全invalidate；query staleTime0/default可见恢复机制原已存在。没有新增轮询、额外状态层或为正常手动disconnect/connect补丁。
+
+最小修复：isWebAuthFailure只接受401+UNAUTHORIZED，三处共用；业务401保持原status/code/details返回，不续期、不重放、不清Web登录。保留原session-generation/单飞续期/cookie队列，未知业务401也不误当Web认证。既有中性protected-resource认证transport新增公开请求回归：SESSION_EXPIRED请求次数1、refresh0、原码不变且原Web登录仍在；没有账号ID/DTO、Session、Telegram RPC或account/gateway HTTP替身。
+
+第二个red：把sync既有只刷日志行为提为invalidateAccountState后，`pnpm --dir frontend exec vitest run src/api/account-cache.test.ts --reporter=verbose`用真实QueryClient和普通字符串缓存值复现accounts.isInvalidated=false（cache-red.log）。随后统一刷新accounts/account/account-logs，sync成功与失败均执行；check/transition、移动分组和既有WS账号事件原位复用，合并重复失效路径。群快照不失效、不清空，完整成功sync仍仅由既有onSuccess替换。这个小模块用于多个真实调用者和纯缓存公共契约，不新增账号状态存储。纯缓存回归覆盖列表、详情、各筛选日志及旧成功快照不变；它不宣称跑过真实账号同步故障。
+
+错误展示无需新增文案体系：既有AccountFeedback已为SESSION_EXPIRED、ACCOUNT_SUSPENDED、ILLEGAL_TRANSITION提供中文并由Feedback保留code；新增三条直接ApiError值的UI断言确认，不构造账号响应。真正transition非法仍显示ILLEGAL_TRANSITION，不在客户端改写成其他错误。
+
+最终定向`pnpm --dir frontend exec vitest run src/api/auth-failure.test.ts src/api/account-cache.test.ts src/api/client.test.ts src/components/AccountFeedback.test.tsx src/api/realtime.test.ts --reporter=verbose`：5files/20passed，7.04s（affected-green.log），包含9项既有认证并发、安全续期/会话隔离及通用WS游标回归。`pnpm --dir frontend typecheck`通过（typecheck.log）；`pnpm --dir frontend build`通过，3259modules/6.49s（build.log），原大chunk警告不扩展处理。
+
+生产artifact：index-CwaG6Tsh.js SHA256 CE2948DF793915BFF72E2F58AB88C3ADECDCE7B7B21AB01F7A471B0CB3E545A7；CSS仍index-gBi7et6o.css，SHA256 D6799A9B78D5261061B96F12DB17485170BC815A8B2D31805B24D1802C660CB6。本轮证据全部在`.local/inspection-20261015/iris-i20/`，artifact-hashes.json保留机器可读值。
+
+限制：本轮没有运行真实check/connect/sync或强制账号失效，也没有浏览器重连/窗口恢复真实故障验收；没有必要重复无法触及终态场景的空栈E2E。精确后台终态状态/code由Orion/Niko修复与验证，实际已上传账号业务按用户选择留待手动验收。上述纯条件、普通QueryClient值和中性auth transport通过不等同真实Telegram链路通过。源码与本记录稳定后冻结，SUBMITTED等待主控集成/独立review。

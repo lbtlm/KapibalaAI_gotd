@@ -1,6 +1,7 @@
 import axios, { AxiosError, type AxiosInstance } from 'axios'
 export type Role = 'admin' | 'viewer'
 export interface Session { accessToken: string; role?: Role }
+export const isWebAuthFailure = (status: number | undefined, code: unknown) => status === 401 && code === 'UNAUTHORIZED'
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string, public details: Record<string, unknown> = {}) { super(message) }
 }
@@ -69,14 +70,15 @@ export class ApiClient {
     } catch (error) {
       if (error instanceof ApiError) throw error
       const e = error as AxiosError<{ error?: Record<string, unknown> }>
-      if (e.response?.status === 401 && authenticated) this.assertGeneration(generation)
-      if (e.response?.status === 401 && authenticated && retry) {
+      const detail = e.response?.data?.error ?? {}
+      const webAuthFailure = isWebAuthFailure(e.response?.status, detail.code)
+      if (webAuthFailure && authenticated) this.assertGeneration(generation)
+      if (webAuthFailure && authenticated && retry) {
         if (sentToken === this.session?.accessToken || !this.session) await this.refresh()
         this.assertGeneration(generation)
         return this.request<T>(url, method, data, authenticated, false)
       }
-      const detail = e.response?.data?.error ?? {}
-      if (e.response?.status === 401 && authenticated) this.setSession(null)
+      if (webAuthFailure && authenticated) this.setSession(null)
       throw new ApiError(e.response?.status ?? 0, String(detail.code ?? 'NETWORK_ERROR'), String(detail.message ?? '请求失败，请稍后重试'), detail)
     }
   }
