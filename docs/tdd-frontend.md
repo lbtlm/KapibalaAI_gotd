@@ -237,3 +237,8 @@ Red: pure rendered account columns could not disable only the pending account. G
 Replaced old sequence-page execution UI with reusable script library editor and per-group execution panel. JSON and visual forms share one definition; resolved preview shows actual accounts, roles and text. Five editor tests cover incomplete-name editing and invalid role/index/delay/text. Frontend46tests passed; typecheck/build passed. Pure editor/account props and preexisting auth/provider tests only; no simulated Gateway/account responses. Actual populated-group browser acceptance and real Telegram effects remain manual/pending.
 
 R24 controller:21 account feedback/row/deletion tests pass, including actionable AUTH_KEY_DUPLICATED text. Typecheck and production build pass. Account link join and group sync share per-account mutation tracking; other rows remain available. No live group operation tested.
+
+
+## R25 主控：折叠、预览与真实 AI 草稿
+
+Red：新增折叠/变量预览与AI草稿采用测试，旧编辑器2失败、原5通过。Green：编辑器8项（含错误保留内容）及既有API客户端10项通过；typecheck、生产build通过。生成候选不会自行替换编辑值或调用保存，采用后继续编辑；未配置模型显示具体原因。共享布局移除1600px上限，Table/Select显式浅蓝选择token。三个桌面宽度使用真实页面读操作验证；20步编辑示例仅存在浏览器草稿，不伪造账号或Gateway响应。原字体/控件/角色和变量契约复用；移除原全展开步骤表单和重复库预览渲染。实际模型结果的最终验收单独记录。

@@ -85,6 +85,7 @@ func (s *Service) Handler() http.Handler {
 	})
 	m.HandleFunc("POST /agent/turn", s.turn)
 	m.HandleFunc("POST /agent/audit", s.audit)
+	m.HandleFunc("POST /sequences/generate", s.generateSequence)
 	if s.cfg.Mode == "scripted" && s.cfg.AdminEnabled {
 		m.HandleFunc("POST /admin/script", s.setScript)
 	}

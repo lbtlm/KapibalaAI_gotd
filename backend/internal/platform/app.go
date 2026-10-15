@@ -187,6 +187,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("POST /api/groups/{id}/send", a.wrap(a.send, false))
 	m.HandleFunc("GET /api/groups/{id}/messages", a.wrap(a.messages, false))
 	m.HandleFunc("POST /api/sequences", a.wrap(a.createSequence, false))
+	m.HandleFunc("POST /api/sequences/generate", a.wrap(a.generateSequence, false))
 	m.HandleFunc("PUT /api/sequences/{id}", a.wrap(a.createSequence, false))
 	m.HandleFunc("GET /api/sequences", a.wrap(a.sequences, false))
 	m.HandleFunc("POST /api/groups/{id}/sequence-runs", a.wrap(a.startSequence, false))

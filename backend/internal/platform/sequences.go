@@ -22,13 +22,8 @@ func (a *App) createSequence(w http.ResponseWriter, r *http.Request) error {
 	if e := decode(r, &b); e != nil {
 		return e
 	}
-	if b.Name == "" || len(b.Steps) == 0 {
+	if !(domain.SequenceDefinition{Name: b.Name, Steps: b.Steps}).Valid() {
 		return fail(400, "VALIDATION_ERROR")
-	}
-	for i, s := range b.Steps {
-		if s.Index != i+1 || s.DelaySeconds < 0 || (s.AccountRole != "admin" && s.AccountRole != "member") || s.Text == "" {
-			return fail(400, "VALIDATION_ERROR")
-		}
 	}
 	id := ID()
 	status := 201

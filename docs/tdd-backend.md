@@ -237,3 +237,8 @@ Red: connect inherited12s despite Gateway30s readiness, and a closed connection 
 See workspace-refinement-20261015.md R23 for red/green evidence. Reused jobs, audit/effect receipts, sequence snapshots and advisory leases. Account-specific connection ownership unchanged. Actual PostgreSQL reds: chosen administrator ignored, end-marketing left triggers enabled, preview omitted bound actors, slow group task blocked another group. Normal16top and race19top/sub passes; migration reconstruction covered. No Gateway substitutes, Sessions or real Telegram operations. Provider-only fixtures retain their existing boundary. Limits reserve sending capacity while Agents await receipts; app shutdown cancels and joins all workers.
 
 R24 controller: terminal join endpoint red404 then green explicit401/403, reusing account-group operation locking/logging. Concrete AUTH_KEY_DUPLICATED stays401 and maps to session_expired; focused terminal event/API race checks pass. No simulated Gateway was used.
+
+
+## R25 主控：真实模型生成测试剧本
+
+Red：/sequences/generate缺失，chat_completions、responses及未配置拒绝三个场景均404失败。Green：复用provider.model、已有服务端配置及backend request/权限包装；单次模型调用、50秒模型截止，外层60/70/75秒预算分别用于backend/nginx/browser，仅作用于生成端点。模型JSON必须满足步骤数、角色、索引、消息和延迟约束，拒绝截断/无效输出；无API Key明确AI_NOT_CONFIGURED，不回退模板。生成不保存、不执行，用户保存仍走原sequences API，共用domain定义校验以移除重复规则。隔离PostgreSQL集成覆盖匿名401、viewer403、admin生成以及草稿未落库、确认后保存；provider-only HTTP模型边界保留既有测试约定，不模拟Telegram。定向集成、race与vet通过。真实DeepSeek生成另行记录，不能把测试模型响应当作真实验收。

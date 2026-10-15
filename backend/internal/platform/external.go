@@ -31,6 +31,11 @@ func (a *App) gateway(ctx context.Context, method, path string, input, output an
 	return a.request(ctx, a.cfg.GatewayURL, method, path, input, output)
 }
 func (a *App) requestClient(base, method, path string) *http.Client {
+	if base == a.cfg.AgentURL && method == http.MethodPost && path == "/sequences/generate" {
+		client := *a.client
+		client.Timeout = 60 * time.Second
+		return &client
+	}
 	if base == a.cfg.GatewayURL && method == http.MethodPost && strings.HasPrefix(path, "/accounts/") && strings.HasSuffix(path, "/connect") {
 		client := *a.client
 		client.Timeout = 40 * time.Second // Includes the Gateway's 30-second startup deadline.

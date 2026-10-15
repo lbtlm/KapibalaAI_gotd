@@ -66,6 +66,10 @@ services:
       PORT: 8082
       AGENT_MODE: scripted
       AGENT_ADMIN_ENABLED: 'false'
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-flash}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com}
+      OPENAI_API_STYLE: ${OPENAI_API_STYLE:-chat_completions}
     depends_on:
       migrate:
         condition: service_completed_successfully

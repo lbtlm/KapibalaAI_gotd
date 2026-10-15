@@ -24,7 +24,7 @@ export default function Groups() {
   <div className={styles.pageHeading}><div><h1>群组工作区</h1><p>创建群组、分配成员与剧本，查看实时消息和执行记录。</p></div>{session?.role==='admin'&&<Space><ImportGroup accounts={accounts.data??[]}/><Button type="primary" onClick={()=>setOpen(true)}>创建群组</Button></Space>}</div>
   <ErrorNotice error={groups.error??create.error}/>
   {job&&<JobFeedback id={job} onFinished={()=>cache.invalidateQueries({queryKey:['groups']})}/>}
-  <div className={styles.tableShell}><Table size="small" rowKey="id" locale={{emptyText:<LoadState loading={groups.isLoading} empty={!groups.isLoading} description="创建或导入群组后，进入群内配置剧本与 Agent。"/>}} dataSource={groups.data} pagination={false} columns={[
+  <div className={styles.tableShell}><Table size="small" scroll={{x:800}} rowKey="id" locale={{emptyText:<LoadState loading={groups.isLoading} empty={!groups.isLoading} description="创建或导入群组后，进入群内配置剧本与 Agent。"/>}} dataSource={groups.data} pagination={false} columns={[
    {title:'群组',render:(_,g)=><Link to={'/groups/'+g.id}>{g.title||g.gatewayGroupId||g.id}{g.username&&<div className={styles.meta}>@{g.username}</div>}</Link>},
    {title:'状态',dataIndex:'status',render:s=><StatusTag status={s}/>},
    {title:'群主',render:(_,g)=>label(g.creatorAccountId)},

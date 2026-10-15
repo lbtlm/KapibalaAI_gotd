@@ -32,6 +32,13 @@ func TestGatewayConnectionBudgetDoesNotCutOffReadiness(t *testing.T) {
 	}
 }
 
+func TestSequenceGenerationBudgetIsScoped(t *testing.T) {
+	a := &App{cfg: Config{AgentURL: "http://agent"}, client: &http.Client{Timeout: 12 * time.Second}}
+	if a.requestClient("http://agent", "POST", "/sequences/generate").Timeout <= 50*time.Second || a.requestClient("http://agent", "POST", "/agent/turn").Timeout != 12*time.Second || a.client.Timeout != 12*time.Second {
+		t.Fatal("generation must outlive model deadline without changing Agent turns")
+	}
+}
+
 func TestGatewayTransportErrorsKeepTimeoutDistinctFromUnavailable(t *testing.T) {
 	for _, tt := range []struct {
 		err    error
