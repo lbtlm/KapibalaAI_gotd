@@ -303,3 +303,13 @@ Red：`TestRateLimitExpiresWithoutQueuedMessagesAcrossInstances` 在真实PG中�
 首次发布 full CI（run 38779940632）发现三处旧预期：两项导入测试仍将连接拒绝断言为 NETWORK_TIMEOUT，退群 / 删除并发测试仍将已进入 ending 的群断言为 active_job。现有 R22 明确区分 GATEWAY_UNAVAILABLE 与超时，R23 的 leave-all 在同一事务中将群置为 ending；删除校验先检查尚未退出的群。因此仅更新测试到既有精确错误码 / 原因，增加已受理群仍为 ending 的状态断言，保留原有身份稳定性、历史数据、HTTP 409、运行中任务和无悬空账号检查，不改变运行代码。
 
 独立空 PostgreSQL 与真实空 Telegram 模式网关复现相同三个 RED（2.116s），修正后三个测试及其三个并发子例全部 GREEN（2.153s）。定向七个顶层测试 race 通过（24.899s），包含传输错误分类、占用 / viewer 拒绝、网关不可用时数据保留和锁后重新核验；无跳过或 race 报告。没有加载 Session、调用真实 Telegram / LLM，也未重启已人工验证的应用容器。失败的首次 CI 保留为历史证据，最终发布以修正后的 PR 检查结果为准。
+
+## R37 发布 Go 检查的完整排查
+
+第二次 full CI（run 38781808095）中的业务测试全部通过，但 go-test 守卫拒绝 `TestLiveAmbiguousMessageRequestsAuditedReply` 的预期跳过。该报错首轮也存在：R36 的三项旧断言修正不足以让完整门禁通过。普通 CI 不提供真实 AI key；两个显式 opt-in 模型测试应在 RUN_LIVE_PROVIDER 未启用时跳过，启用时不能豁免。仅在既有守卫登记缺失的精确测试名，不按前缀放开，也不放过缺 PostgreSQL / 空网关配置的集成测试。
+
+RED：扩展守卫测试后，新增模型测试得到 false 而预期 true。GREEN：6 项守卫测试全部通过，覆盖两个模型测试的启用 / 禁用、模块 / 包边界、未知名称及子测试拒绝、数据库 / 网关缺配置拒绝、子进程助手和无测试包的编译证据。另直接检查 live_test.go 中的测试入口，防止新增同类模型测试后再次漏登记。
+
+按用户要求在隔离 Linux 完整验证：Node 22.14.0、Go 1.24.13、独立 PostgreSQL 与真实空 Telegram 模式网关；通过与 CI 相同的 `node scripts/go-test.mjs backend`、`gateway`、各自 `-race` 和两模块 `go vet ./...`。backend platform 普通 / race 为 131.225s / 265.496s，gateway 为 5.483s / 7.426s；无失败、意外跳过或 race 报告。有效跳过仅为两个未启用的真实模型测试及非子进程的 helper。
+
+独立空数据 Compose 复用人工验证候选 a988d4e 的原有业务镜像，通过正式 compose-smoke 的页面资源、登录、服务健康与 WebSocket 鉴权 / 来源校验。未使用本地 .env、Session 或真实 AI key，未操作现有演示数据。前端及 Playwright 复用第二次远端 CI 的通过结果；最终发布仍需仓库完整 CI Gate 通过。本轮只改 CI 守卫、测试和此记录，运行代码与人工验收版本一致。
