@@ -1,4 +1,4 @@
-import {readFileSync} from 'node:fs';
+import {readFileSync,appendFileSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 
@@ -12,15 +12,41 @@ export function validatePR({base, head, title, sameRepository}) {
   }
 }
 export function validateGate(needs) {
+  const docs=needs.policy?.result==='success' && needs.policy?.outputs?.mode==='docs';
   for (const job of ['policy', 'go', 'frontend', 'e2e', 'artifact']) {
-    if (needs[job]?.result !== 'success') throw new Error(`${job}: ${needs[job]?.result || 'missing'} blocks CI Gate`);
+    const expected=docs && job!=='policy' ? 'skipped' : 'success';
+    if (needs[job]?.result !== expected) throw new Error(`${job}: ${needs[job]?.result || 'missing'} blocks CI Gate (expected ${expected})`);
   }
+}
+
+function changeMode(eventName,event) {
+  let base,head,range;
+  if (eventName==='pull_request') {
+    base=event?.pull_request?.base?.sha;head=event?.pull_request?.head?.sha;range='...';
+  } else if (eventName==='push') {
+    base=event?.before;head=event?.after;range='..';
+  }
+  if (![base,head].every(sha=>typeof sha==='string' && /^[a-f0-9]{40}$/.test(sha) && !/^0+$/.test(sha))) return 'full';
+  try {
+    // Disable rename detection so moving code into a documentation path also
+    // reports the removed source path. NUL separation preserves unusual names.
+    const paths=execFileSync('git',['diff','--no-renames','--name-only','-z',base+range+head,'--'],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).split('\0').filter(Boolean);
+    const documentation=/^(?:(?:README|CONTRIBUTING|AGENTS|CHANGELOG)\.md|docs\/[^\0]+\.(?:md|rst|txt))$/;
+    return paths.length>0 && paths.every(file=>documentation.test(file)) ? 'docs' : 'full';
+  } catch {return 'full';}
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     if (process.argv[2] === 'gate') {
       validateGate(JSON.parse(process.env.CI_NEEDS || '{}'));
+    } else if (process.argv[2] === 'mode') {
+      let event={};
+      try {event=JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH,'utf8'));} catch {}
+      const mode=changeMode(process.env.GITHUB_EVENT_NAME,event);
+      if (!process.env.GITHUB_OUTPUT) throw new Error('GITHUB_OUTPUT is required for CI mode');
+      appendFileSync(process.env.GITHUB_OUTPUT,`mode=${mode}\n`);
+      console.log(`CI change mode: ${mode}`);
     } else if (process.env.GITHUB_EVENT_NAME === 'pull_request') {
       const pr = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')).pull_request;
       validatePR({base: pr.base.ref, head: pr.head.ref, title: pr.title, sameRepository: pr.head.repo?.full_name === pr.base.repo.full_name});

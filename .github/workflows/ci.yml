@@ -16,6 +16,8 @@ jobs:
   policy:
     name: Branch and commit policy
     runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.changes.outputs.mode }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,9 +27,14 @@ jobs:
           node-version: 22.14.0
       - run: node --test scripts/*.test.mjs
       - run: node scripts/ci-policy.mjs
+      - id: changes
+        name: Classify all changed paths (unknown defaults to full)
+        run: node scripts/ci-policy.mjs mode
 
   go:
     name: Go / PostgreSQL / race / vet
+    needs: policy
+    if: needs.policy.outputs.mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -94,6 +101,8 @@ jobs:
 
   frontend:
     name: Frontend unit / types / build
+    needs: policy
+    if: needs.policy.outputs.mode == 'full'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -116,6 +125,8 @@ jobs:
 
   e2e:
     name: Real stack Playwright C3
+    needs: policy
+    if: needs.policy.outputs.mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -166,6 +177,7 @@ jobs:
   artifact:
     name: Immutable candidate images
     needs: [policy, go, frontend, e2e]
+    if: needs.policy.outputs.mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:

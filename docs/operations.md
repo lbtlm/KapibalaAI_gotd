@@ -6,11 +6,13 @@ Compose 的数据库健康依赖与迁移完成依赖按 [Docker 启动顺序规
 
 ## CI and artifacts
 
-`.github/workflows/ci.yml` 在面向 dev/main 的 PR、dev/main push、手动启动时运行。无路径过滤：文档和 CI 变更仍经过仓库门禁。`policy` 验证工作分支目标、PR 标题和非 merge commit 格式；main 只接受本仓库 dev 的推广 PR。Go 作业明确提供真实 PostgreSQL DSN，并在另一数据库 `kapibala_gateway_integration` 启动生产 fake gateway，通过 `GATEWAY_INTEGRATION_URL` 运行实际群生命周期组合测试；gateway writer lease 测试使用 `kapibala_test`，互不争夺同库 writer。作业执行单元/集成、race、vet，并回收自有 gateway PID。前端作业执行 unit/type/build。E2E 使用独立 PostgreSQL、真实 backend、fake gateway、scripted provider 和 Vite。
+`.github/workflows/ci.yml` 在面向 dev/main 的 PR、dev/main push、手动启动时运行，始终保留 `policy` 和固定 required check `CI Gate`。`policy` 验证工作分支目标、PR 标题和非 merge commit 格式；main 只接受本仓库 dev 的推广 PR。它还运行交付脚本测试，并从真实 Git diff 判定 docs/full 模式：仅根 `README.md`、`CONTRIBUTING.md`、`AGENTS.md`、`CHANGELOG.md` 和 `docs/` 下的 `.md`、`.rst`、`.txt` 路径全部命中时，跳过 Go、frontend、E2E、images 四个昂贵作业。PR 使用 base/head 的 merge-base 差异，push 使用 before/after 差异；关闭 rename detection，移动代码到文档仍包含原代码的删除路径。空差异、未知或缺失基线、手动启动及任何代码/脚本/依赖/配置/工作流变更均执行 full 模式。普通文档提交不使用 `[skip ci]`；轻量模式不会取消分支保护，也不会让 Gate 永久 pending。
 
-固定 `CI Gate` 使用 `always()` 执行，检查 policy/go/frontend/e2e/artifact 全部 result=success。failure/cancelled/skipped/缺失均阻塞。workflow 整体取消不能生成成功 gate，应保持 required check 未通过。GitHub 对 needs result 和条件语法的规则见 [Contexts](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts) 和 [Workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)。
+full 模式的 Go 作业明确提供真实 PostgreSQL DSN，并在另一数据库 `kapibala_gateway_integration` 启动生产 fake gateway，通过 `GATEWAY_INTEGRATION_URL` 运行实际群生命周期组合测试；gateway writer lease 测试使用 `kapibala_test`，互不争夺同库 writer。作业执行单元/集成、race、vet，并回收自有 gateway PID。前端作业执行 unit/type/build。E2E 使用独立 PostgreSQL、真实 backend、fake gateway、scripted provider 和 Vite。
 
-前置检查全部成功才构建 Docker 镜像。产物作业通过 `compose.ci.yaml` 在专用 `kapibala-ci-<run_id>-<run_attempt>` 项目启动同批镜像，验证 backend/gateway/provider 健康、前端 root/JS 资源与 HttpOnly refresh cookie 登录 API，然后回收该项目。仅这个 disposable CI 项目执行 `down --volumes --remove-orphans`；该规则不适用于演示或真实数据库。任何启动/冒烟/清理失败均阻止打包。交付包 `candidate-<github.sha>-<run_attempt>` 包含：
+固定 `CI Gate` 使用 `always()` 执行：full 模式要求 policy/go/frontend/e2e/artifact 全部 result=success；只有 policy 成功且输出明确为 docs 时，才接受其余四项恰好为 skipped。失败、取消、缺失和其他组合继续阻塞。workflow 整体取消不能生成成功 gate，应保持 required check 未通过。分类输出及作业条件按 GitHub 的 [job outputs](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/pass-job-outputs) 和 [job conditions](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions) 传递；Gate 仍检查 [needs results](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts)。
+
+前置检查全部成功才构建 Docker 镜像。产物作业通过 `compose.ci.yaml` 在专用 `kapibala-ci-<run_id>-<run_attempt>` 项目启动同批镜像，验证 backend/gateway/provider 健康、前端 root/JS 资源、HttpOnly refresh cookie 登录，以及同源 WebSocket 101/有效 token 认证、无效 token 拒绝与跨源 403，然后回收该项目。Nginx `/ws` 转发原始 Host（含端口），保留后端同源和鉴权检查。仅这个 disposable CI 项目执行 `down --volumes --remove-orphans`；该规则不适用于演示或真实数据库。任何启动/冒烟/清理失败均阻止打包。交付包 `candidate-<github.sha>-<run_attempt>` 包含：
 
 - `images.tar.gz`：backend（含 migrate/provider）、gateway、frontend 三个 SHA 标签镜像。
 - `compose.yaml`：启动/迁移规则。
