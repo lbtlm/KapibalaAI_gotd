@@ -12,6 +12,8 @@ User explicitly removed account/gateway simulation, including related test doubl
 
 ## Ownership
 
+2026-10-15 user override: all subsequent implementation, verification and review are performed directly by the controller. Historical worker assignments below are no longer active. Keep issue #4 and PR #5, with focused incremental commits. The clarified group/script/Agent requirements are recorded in `workspace-refinement-20261015.md`; account concurrency and timeout fixes take priority. No additional live account experiments are authorized by this development instruction.
+
 - Niko: `gateway/` Go module, all gateway source/tests, gotd adapter, durable credential registry, gateway README/Dockerfile, `docs/reuse-gateway.md` and `docs/tdd-gateway.md`.
 - Orion: `backend/` Go module including business API, PostgreSQL migrations, domain workers, agent executor and standalone `cmd/agent` OpenAI/scripted provider; backend tests/README/Dockerfile; `docs/reuse-backend.md` and `docs/tdd-backend.md`.
 - Iris: `frontend/`, UI tests and browser test scaffolding, `docs/reuse-frontend.md`, `docs/tdd-frontend.md` and `docs/ui-design.md`.

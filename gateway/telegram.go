@@ -141,7 +141,12 @@ func (a *TelegramAdapter) Resume(s *Service) {
 // Connect adapts the source online_manager_lifecycle.go client.Run/Self/updates loop.
 func (a *TelegramAdapter) Connect(ctx context.Context, id string) (pid string, err error) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	locked := true
+	defer func() {
+		if locked {
+			a.mu.Unlock()
+		}
+	}()
 	attempted := a.sessions[id]
 	ownsAttempt := false
 	defer func() {
@@ -155,6 +160,9 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (pid string, e
 	}()
 	if err := ctx.Err(); err != nil {
 		return "", err
+	}
+	if a.ctx != nil && a.ctx.Err() != nil {
+		return "", a.ctx.Err()
 	}
 	if s := a.sessions[id]; s != nil {
 		ended := false
@@ -183,23 +191,41 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (pid string, e
 	if !ok {
 		return "", &APIError{404, "ACCOUNT_NOT_FOUND", 0}
 	}
+	runCtx, cancel := context.WithCancel(a.ctx)
+	cid, _ := ctx.Value(connectionIDKey{}).(string)
+	s := &onlineSession{connectionID: cid, attemptContext: ctx, cancel: cancel, done: make(chan struct{})}
+	attempted, ownsAttempt = s, true
+	// Reserve this account before storage/network work. Other accounts never
+	// wait for its startup; duplicate callers cannot start another client.
+	a.sessions[id] = s
+	a.mu.Unlock()
+	locked = false
+	runStarted := false
+	defer func() {
+		if err != nil {
+			cancel()
+		}
+		if !runStarted {
+			close(s.done)
+		}
+	}()
+	connectCtx, connectCancel := context.WithTimeout(ctx, 30*time.Second)
+	stopRun := context.AfterFunc(runCtx, connectCancel)
+	defer func() { stopRun(); connectCancel() }()
 	storage := dbSession{a.db, id}
-	if _, err := storage.LoadSession(ctx); err != nil {
+	if _, err := storage.LoadSession(connectCtx); err != nil {
+		if connectCtx.Err() != nil {
+			return "", connectCtx.Err()
+		}
 		return "", &APIError{503, "CREDENTIALS_INCOMPLETE", 0}
 	}
-	runCtx, cancel := context.WithCancel(a.ctx)
 	var manager *updates.Manager
 	client := telegram.NewClient(c.APIID, c.APIHash, telegram.Options{SessionStorage: storage, UpdateHandler: telegram.UpdateHandlerFunc(func(ctx context.Context, u tg.UpdatesClass) error { return manager.Handle(ctx, u) }), MigrationTimeout: 120 * time.Second, Device: telegram.DeviceConfig{DeviceModel: c.DeviceModel, SystemVersion: c.SystemVersion, AppVersion: c.AppVersion, LangCode: "en", SystemLangCode: "en-US"}})
-	cid, _ := ctx.Value(connectionIDKey{}).(string)
-	s := &onlineSession{connectionID: cid, attemptContext: ctx, client: client, api: a.fencedClient(tg.NewClient(client)), cancel: cancel, done: make(chan struct{})}
-	attempted = s
-	ownsAttempt = true
-	// Retain starting/failed clients until Run has actually exited. Deletion and
-	// shutdown must not mistake a startup timeout for a fully stopped client.
-	a.sessions[id] = s
+	s.client, s.api = client, a.fencedClient(tg.NewClient(client))
 	pipeline := a.Updates(id, s.api, cancel)
 	manager = updates.New(updates.Config{Handler: pipeline.Handler, Storage: pipeline.Storage, AccessHasher: pipeline.AccessHasher, OnChannelTooLong: pipeline.OnChannelTooLong})
 	ready := make(chan error, 1)
+	runStarted = true
 	go func() {
 		defer close(s.done)
 		err := client.Run(runCtx, func(live context.Context) error {
@@ -227,8 +253,6 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (pid string, e
 			}()
 		}
 	}()
-	connectCtx, connectCancel := context.WithTimeout(ctx, 30*time.Second)
-	defer connectCancel()
 	select {
 	case err := <-ready:
 		if err != nil {
@@ -238,6 +262,11 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (pid string, e
 		if err := connectCtx.Err(); err != nil {
 			cancel()
 			return "", platformError(err)
+		}
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		if a.sessions[id] != s || s.intentionalStop || runCtx.Err() != nil || s.self == nil {
+			return "", &APIError{409, "CONNECTION_ENDED", 0}
 		}
 		s.ready = true
 		return stringID(s.self.ID), nil

@@ -158,8 +158,7 @@ func (s *Service) deleteAccountHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a := s.cfg.Telegram
-	// Connect currently holds a.mu through startup and may need Service.mu.
-	// Never wait for that lock while holding Service.mu.
+	// Keep deletion admission bounded while holding Service.mu.
 	if !a.mu.TryLock() {
 		fail(w, &APIError{503, "GATEWAY_UNAVAILABLE", 0})
 		return

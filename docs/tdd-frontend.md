@@ -227,3 +227,7 @@ TDD证据均为纯props、直接错误值或真实QueryClient普通缓存键/字
 边界：纯控件回调不伪造API成功，缓存值不冒充Telegram资料；本轮未验证真实已上传账号成功删除、占用拒绝、跨库不完整重试、真实凭据清理或跨窗口真实删除。后端/网关真实PG边界由各owner提供，用户现有五账号完整保留待手动验收。源码冻结SUBMITTED，等待主控独立review和schema9真实空栈联测。
 
 I21主控确认对象修正：删除确认仅随机内部ID不易核对，现复用当前Account.phone及既有accountName；手机号/昵称有值才显示，内部ID始终显示且请求仍绑定deleting ID，不读凭据、不增加API或样式。先加纯props文本输入断言，identity-red.log 1failed/11passed（手机号未显示）；最小props/文本改后identity-green.log 12passed/9.54s。输入为非真实的说明性字符串，不构造账号/网关响应。identity-typecheck.log通过，identity-build.log通过3260modules/7.65s；原缓存/transport结果复用，未重复36项。最新产物index-D3K4atoX.js SHA256 6261872789FBBEDB329E6E0E4CDB69EA93563935CDDADB2899E535489B261A3D，CSS未变。artifact/source-hashes已更新；源码再冻结，实际schema9空栈仍待主控交接。
+
+## R22 controller: per-account action state
+
+Red: pure rendered account columns could not disable only the pending account. Green: per-account mutation keys/pending IDs and synchronous double-click admission; errors stay with their account. Group moves affect selected accounts only, deletion affects its target. Removed obsolete global action busy/error state. Account columns plus deletion/auth tests23pass; typecheck/build pass. Browser check/connect budget60s covers backend connect40s plus profile12s; unrelated calls remain15s. No simulated account/Gateway response. Real concurrent account checking remains manual acceptance.
