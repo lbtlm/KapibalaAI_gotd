@@ -38,8 +38,8 @@ func (s *Service) groupHTTP(w http.ResponseWriter, r *http.Request) {
 	if op == "create" {
 		aid = in.CreatorAccountID
 	}
-	if op == "kick" {
-		if handled, result, e := s.lookupKickKey(gid, aid, in); handled {
+	if op == "kick" || op == "promote" {
+		if handled, result, e := s.lookupMemberKey(op, gid, aid, in); handled {
 			if e != nil {
 				fail(w, e)
 			} else {
@@ -61,6 +61,13 @@ func (s *Service) groupHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	f := s.consumeFault(op, aid, gid)
 	if f != nil && f.Code != "NETWORK_TIMEOUT" && f.Code != "RATE_LIMITED" && f.Code != "ASYNC_FAILED" && f.Code != "JOIN_MISSING" && f.Code != "INVITE_DELAY" {
+		if op == "promote" {
+			if err := s.prepareMemberEffect(opCtx, op, gid, aid, in); err != nil {
+				fail(w, err)
+				return
+			}
+			s.finishMemberEffect(op, in.IdempotencyKey, faultError(f))
+		}
 		if f.Code == "ACCOUNT_SUSPENDED" || f.Code == "SESSION_EXPIRED" {
 			s.terminal(aid, map[bool]string{true: "suspended", false: "session_expired"}[f.Code == "ACCOUNT_SUSPENDED"])
 		}
@@ -71,15 +78,15 @@ func (s *Service) groupHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.cfg.Telegram != nil {
-		if op == "kick" {
-			if e := s.prepareKick(opCtx, gid, aid, in); e != nil {
+		if op == "kick" || op == "promote" {
+			if e := s.prepareMemberEffect(opCtx, op, gid, aid, in); e != nil {
 				fail(w, e)
 				return
 			}
 		}
 		out, err := s.cfg.Telegram.Execute(opCtx, op, gid, in, s)
-		if op == "kick" {
-			s.finishKick(in.IdempotencyKey, err)
+		if op == "kick" || op == "promote" {
+			s.finishMemberEffect(op, in.IdempotencyKey, err)
 		}
 		status := 200
 		if op == "join" || op == "send" {
@@ -159,16 +166,25 @@ func (s *Service) groupHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		s.commitHTTP(w, r, 202, map[string]bool{"accepted": true}, nil)
 	case "promote":
+		if err := s.prepareMemberEffect(opCtx, op, gid, aid, in); err != nil {
+			fail(w, err)
+			return
+		}
 		if in.ByAccountID != g.Owner {
-			fail(w, &APIError{403, "NO_PERMISSION", 0})
+			err := &APIError{403, "NO_PERMISSION", 0}
+			s.finishMemberEffect(op, in.IdempotencyKey, err)
+			s.commitHTTP(w, r, 0, nil, err)
 			return
 		}
 		target := s.state.Accounts[in.AccountID]
 		if target == nil || !g.Members[target.PlatformID] {
-			fail(w, &APIError{409, "NOT_MEMBER_YET", 0})
+			err := &APIError{409, "NOT_MEMBER_YET", 0}
+			s.finishMemberEffect(op, in.IdempotencyKey, err)
+			s.commitHTTP(w, r, 0, nil, err)
 			return
 		}
 		g.Admins[in.AccountID] = true
+		s.finishMemberEffect(op, in.IdempotencyKey, nil)
 		s.commitHTTP(w, r, 200, map[string]any{}, nil)
 	case "kick":
 		owner := s.state.Accounts[g.Owner]
@@ -184,7 +200,7 @@ func (s *Service) groupHTTP(w http.ResponseWriter, r *http.Request) {
 			fail(w, &APIError{400, "INVALID_INPUT", 0})
 			return
 		}
-		if e := s.prepareKick(opCtx, gid, aid, in); e != nil {
+		if e := s.prepareMemberEffect(opCtx, op, gid, aid, in); e != nil {
 			fail(w, e)
 			return
 		}
@@ -199,7 +215,7 @@ func (s *Service) groupHTTP(w http.ResponseWriter, r *http.Request) {
 			delete(g.Members, in.TargetID)
 			s.state.Jobs = append(s.state.Jobs, job{Kind: "member_left", Due: now.Add(100 * time.Millisecond), GroupID: gid, PlatformID: in.TargetID})
 		}
-		s.finishKick(in.IdempotencyKey, nil)
+		s.finishMemberEffect(op, in.IdempotencyKey, nil)
 		s.commitHTTP(w, r, 200, map[string]bool{"kicked": true}, nil)
 	case "leave":
 		pid := s.state.Accounts[aid].PlatformID

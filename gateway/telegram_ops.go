@@ -34,7 +34,7 @@ func (s *Service) importHTTP(w http.ResponseWriter, r *http.Request) {
 	s.commitHTTP(w, r, 200, out, e)
 }
 
-func (a *TelegramAdapter) Execute(ctx context.Context, op, gid string, in input, s *Service) (any, error) {
+func (a *TelegramAdapter) Execute(ctx context.Context, op, gid string, in input, s *Service) (out any, err error) {
 	if op == "import" {
 		return a.importGroup(ctx, in, s)
 	}
@@ -61,8 +61,14 @@ func (a *TelegramAdapter) Execute(ctx context.Context, op, gid string, in input,
 			}
 		}
 	}
+	defer func() { err = s.accountFailure(aid, err) }()
+	promotion := s.state.Effects["promote:"+in.IdempotencyKey]
+	promoteUnknown := op == "promote" && in.IdempotencyKey != "" && promotion != nil && promotion.State == "unknown"
 	live, e := a.online(aid)
 	if e != nil {
+		if promoteUnknown {
+			return nil, &APIError{504, "NETWORK_TIMEOUT", 0}
+		}
 		return nil, e
 	}
 	if op == "create" {
@@ -73,26 +79,35 @@ func (a *TelegramAdapter) Execute(ctx context.Context, op, gid string, in input,
 		if g.Members[pid] {
 			return nil, &APIError{409, "ALREADY_MEMBER", 0}
 		}
+		if err := a.verifyInviteTarget(ctx, g, in.InviteLink, s); err != nil {
+			return nil, err
+		}
 		upd, err := ops.ImportChatInvite(ctx, live.api, inviteHash(in.InviteLink))
 		if err != nil {
 			return nil, platformError(err)
 		}
+		matched := false
 		for _, chat := range updateChats(upd) {
-			if ch, ok := chat.(*tg.Channel); ok && ch.ID == g.ChannelID {
+			if ch, ok := chat.(*tg.Channel); ok && ch.ID == g.ChannelID && !ch.Left {
 				g.AccessHashes[aid] = ch.AccessHash
+				matched = true
 			}
 		}
-		a.handleUpdates(aid, upd)
-		if !g.Members[pid] {
-			g.Members[pid] = true
-			g.MemberRoles[pid] = "member"
-			s.emit("member_joined", map[string]any{"groupId": gid, "platformUserId": pid})
+		if !matched {
+			return nil, &APIError{503, "GATEWAY_UNAVAILABLE", 0}
 		}
+		if _, err := a.members(ctx, aid, gid, g, live, s, true); err != nil {
+			return nil, err
+		}
+		a.handleUpdates(aid, upd)
 		return map[string]bool{"accepted": true}, nil
 	}
 	channel := &tg.InputChannel{ChannelID: g.ChannelID, AccessHash: g.AccessHashes[aid]}
 	peer := &tg.InputPeerChannel{ChannelID: g.ChannelID, AccessHash: g.AccessHashes[aid]}
 	if g.AccessHashes[aid] == 0 {
+		if promoteUnknown {
+			return nil, &APIError{504, "NETWORK_TIMEOUT", 0}
+		}
 		return nil, &APIError{403, "SENDER_NOT_IN_GROUP", 0}
 	}
 	switch op {
@@ -113,7 +128,19 @@ func (a *TelegramAdapter) Execute(ctx context.Context, op, gid string, in input,
 		members, err := a.members(ctx, aid, gid, g, live, s, true)
 		_ = members
 		if err != nil {
+			api := platformError(err)
+			if promoteUnknown && api.Code != "SESSION_EXPIRED" && api.Code != "ACCOUNT_SUSPENDED" {
+				return nil, &APIError{504, "NETWORK_TIMEOUT", 0}
+			}
 			return nil, err
+		}
+		if promoteUnknown {
+			target := s.state.Accounts[in.AccountID]
+			if target != nil && g.Members[target.PlatformID] && g.MemberRoles[target.PlatformID] == "admin" {
+				g.Admins[in.AccountID] = true
+				return map[string]any{}, nil
+			}
+			return nil, &APIError{504, "NETWORK_TIMEOUT", 0}
 		}
 		ownerPresent := false
 		for pid, role := range g.MemberRoles {
@@ -142,6 +169,12 @@ func (a *TelegramAdapter) Execute(ctx context.Context, op, gid string, in input,
 		}
 		var upd tg.UpdatesClass
 		if op == "promote" {
+			if old := s.state.Effects["promote:"+in.IdempotencyKey]; in.IdempotencyKey != "" && old != nil {
+				old.State = "unknown"
+				if err := s.save(ctx); err != nil {
+					return nil, err
+				}
+			}
 			upd, err = ops.EditChatAdmin(ctx, live.api, &tg.ChannelsEditAdminRequest{Channel: channel, UserID: user, AdminRights: tg.ChatAdminRights{ChangeInfo: true, DeleteMessages: true, BanUsers: true, InviteUsers: true, PinMessages: true, ManageCall: true}, Rank: "Kapibala admin"})
 		} else {
 			upd, err = live.api.ChannelsEditBanned(ctx, &tg.ChannelsEditBannedRequest{Channel: channel, Participant: &tg.InputPeerUser{UserID: user.UserID, AccessHash: user.AccessHash}, BannedRights: tg.ChatBannedRights{ViewMessages: true}})
@@ -205,12 +238,6 @@ func (a *TelegramAdapter) Execute(ctx context.Context, op, gid string, in input,
 				acct.RetrySeconds = api.RetryAfterSeconds
 				acct.RateUntil = now.Add(time.Duration(acct.RetrySeconds) * time.Second)
 			}
-			if api.Code == "ACCOUNT_SUSPENDED" {
-				s.terminal(aid, "suspended")
-			}
-			if api.Code == "SESSION_EXPIRED" {
-				s.terminal(aid, "session_expired")
-			}
 			return nil, api
 		}
 		eff.State = "accepted"
@@ -223,6 +250,49 @@ func (a *TelegramAdapter) Execute(ctx context.Context, op, gid string, in input,
 	default:
 		return nil, &APIError{404, "NOT_FOUND", 0}
 	}
+}
+
+// A nonmember's ChatInvite has no peer ID in the pinned schema. Use a current
+// member's read-only view instead of treating a title or the import response as proof.
+func (a *TelegramAdapter) verifyInviteTarget(ctx context.Context, g *group, link string, s *Service) error {
+	ids := make([]string, 0, len(g.AccessHashes))
+	for id := range g.AccessHashes {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		acct := s.state.Accounts[id]
+		if acct == nil || acct.Status != "online" || !g.Members[acct.PlatformID] {
+			continue
+		}
+		live, err := a.online(id)
+		if err != nil {
+			continue
+		}
+		invite, err := live.api.MessagesCheckChatInvite(ctx, inviteHash(link))
+		if err != nil {
+			api := platformError(err)
+			if api.Code == "ACCOUNT_SUSPENDED" || api.Code == "SESSION_EXPIRED" {
+				_ = s.accountFailure(id, api)
+				continue
+			}
+			return api
+		}
+		var chat tg.ChatClass
+		switch value := invite.(type) {
+		case *tg.ChatInviteAlready:
+			chat = value.Chat
+		case *tg.ChatInvitePeek:
+			chat = value.Chat
+		default:
+			continue
+		}
+		if channel, ok := chat.(*tg.Channel); ok && channel.ID == g.ChannelID {
+			return nil
+		}
+		return &APIError{400, "INVITE_GROUP_MISMATCH", 0}
+	}
+	return &APIError{503, "GATEWAY_UNAVAILABLE", 0}
 }
 
 func (a *TelegramAdapter) createGroup(ctx context.Context, aid string, in input, s *Service, live *onlineSession) (any, error) {

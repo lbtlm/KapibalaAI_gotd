@@ -302,7 +302,7 @@ func (s *Service) accountHTTP(w http.ResponseWriter, r *http.Request) {
 			pid, e := s.cfg.Telegram.Connect(r.Context(), id)
 			s.mu.Lock()
 			if e != nil {
-				s.commitHTTP(w, r, 0, nil, e)
+				s.commitHTTP(w, r, 0, nil, s.accountFailure(id, e))
 				return
 			}
 			if err := s.accountError(id, false); err != nil {
@@ -320,7 +320,11 @@ func (s *Service) accountHTTP(w http.ResponseWriter, r *http.Request) {
 			e := s.cfg.Telegram.Disconnect(r.Context(), id)
 			s.mu.Lock()
 			if e != nil {
-				fail(w, e)
+				s.commitHTTP(w, r, 0, nil, s.accountFailure(id, e))
+				return
+			}
+			if err := s.accountError(id, false); err != nil {
+				s.commitHTTP(w, r, 0, nil, err)
 				return
 			}
 			a = s.state.Accounts[id]
@@ -339,11 +343,29 @@ func (s *Service) queryHTTP(w http.ResponseWriter, r *http.Request) {
 		s.commitHTTP(w, r, 0, nil, faultError(f))
 		return
 	}
-	for _, m := range s.state.Messages {
-		if m.GroupID == gid && m.ClientID == cid {
-			respond(w, 200, map[string]any{"msgId": m.MsgID, "sentAt": m.SentAt})
-			return
+	var earliest *message
+	for i := range s.state.Messages {
+		m := &s.state.Messages[i]
+		if m.GroupID != gid || m.ClientID != cid {
+			continue
 		}
+		if earliest == nil || m.SentAt.Before(earliest.SentAt) {
+			earliest = m
+			continue
+		}
+		// Telegram dates have second precision; channel message IDs preserve the
+		// platform order when recovery persists an older result after a newer one.
+		if m.SentAt.Equal(earliest.SentAt) {
+			id, err := strconv.ParseInt(m.MsgID, 10, 64)
+			previous, previousErr := strconv.ParseInt(earliest.MsgID, 10, 64)
+			if err == nil && previousErr == nil && id < previous {
+				earliest = m
+			}
+		}
+	}
+	if earliest != nil {
+		respond(w, 200, map[string]any{"msgId": earliest.MsgID, "sentAt": earliest.SentAt})
+		return
 	}
 	if s.cfg.Mode == "telegram" {
 		for _, e := range s.state.Effects {
