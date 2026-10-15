@@ -55,7 +55,11 @@ test('R1完成后保留结果，WS通知群有R2时自动显示当前运行并�
  const cache=new QueryClient({defaultOptions:{queries:{retry:false}}})
  try{
   render(<QueryClientProvider client={cache}><MemoryRouter initialEntries={['/sequences?group=g1']}><Routes><Route element={<MainLayout/>}><Route path="sequences" element={<Sequences/>}/></Route></Routes></MemoryRouter></QueryClientProvider>)
-  await userEvent.click(await screen.findByRole('button',{name:'预检'}));await userEvent.click(await screen.findByRole('button',{name:'确认启动'}));expect(await screen.findByText('r1',{exact:true})).toBeInTheDocument()
+  const preflight=await screen.findByLabelText('预检',{selector:'button'})
+  await waitFor(()=>expect(preflight).toBeEnabled());fireEvent.click(preflight)
+  const confirm=await screen.findByLabelText('确认启动',{selector:'button'})
+  expect(confirm).toBeEnabled();fireEvent.click(confirm)
+  expect(await screen.findByText('r1',{exact:true})).toBeInTheDocument()
   await act(async()=>{Socket.current.emit({type:'auth',success:true});active=null;status='finished';Socket.current.emit({seq:1,type:'sequence_run',payload:{groupId:'g1',runId:'r1'}})})
   expect(await screen.findByText('已完成',{exact:true})).toBeInTheDocument();expect(screen.getByText('r1',{exact:true})).toBeInTheDocument()
   await act(async()=>{active='r2';status='running';Socket.current.emit({seq:2,type:'sequence_run',payload:{groupId:'g1',runId:'r2'}})})

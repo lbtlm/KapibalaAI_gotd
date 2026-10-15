@@ -100,3 +100,11 @@ Iris · 前端工程师｜序列与重连；主控最终验收。范围为 front
 隔离环境为主控创建的 `kapibala_e2e_today` / PostgreSQL 127.0.0.1:55433；backend/gateway/agent 18080/18081/18082，Vite 15173，Edge headless。Playwright webServer 现在使用 E2E_BASE_URL 的端口，避免 baseURL 指向隔离端口却静默复用 5173。实际启动 `E2E_DATABASE_URL=指定隔离DSN BACKEND_PORT=18080 GATEWAY_PORT=18081 AGENT_PORT=18082 node scripts/fake-stack.mjs`；浏览器环境 `E2E_API_URL=http://127.0.0.1:18080 E2E_GATEWAY_URL=http://127.0.0.1:18081 E2E_BASE_URL=http://127.0.0.1:15173 VITE_BACKEND_URL=http://127.0.0.1:18080 E2E_BROWSER_CHANNEL=msedge`。仅测试 fake 账号/消息，无真实 Telegram/LLM。用户 Docker demo 5173 未使用或改动。
 
 自有 stack node PID 48780，服务 PID 35704/9564/45648；测试完成核对路径为 `.local/fake-stack/18080-18081-18082/bin/` 后全部清理，Playwright 自有 Vite 已退出。进程记录 `processes.json`、`cleanup.txt`；15173/18080/18081/18082 无剩余监听。首次 sandbox `pnpm` EPERM 属于环境限制，必要 escalated 后运行，不计行为 red。证据均在忽略目录 `.local/repairs-20261015/iris/`。本次无分支切换、commit/push、根脚本修改或发布；SUBMITTED 待主控验收。
+
+## F15 attempt2 revision2：CI 序列状态测试超时（2026-10-15）
+
+PR #3 CI `38673104348` frontend 首轮 24 passed / 1 failed；R1→WS R2 用例耗时 5810 ms，超过默认 5000 ms。失败是测试总时限，不是生产状态断言；原日志 `.local/repairs-20261015/ci-frontend-first.log`。冻结期间仅在 `.local/repairs-20261015/iris/a2/` 用副本分段调查：原配置聚焦原测试 2999 ms；带观测的副本 3065 ms，其中建立 R1 的 AntD role 查询和两次 userEvent 交互累计至 2566 ms，后续 WS 状态段约 0.5 s；未观察到等待一秒生产轮询。只替换 click 未改善（3280 ms），精确标签查询并保留 userEvent 为 2287 ms，标签查询配合直接 click 的候选为 1865 ms。分段、候选与限制见该目录 `findings.md` 及相应日志；本地计时不能冒充远端 CI 已通过。
+
+主控在固定 `3c5192b` 独立复核完成后解除指定测试/TDD 冻结。仅该状态测试建立 R1 的两次按钮操作改为已有 aria-label 查询、明确等待预检按钮 enabled，并用 fireEvent.click；确认按钮仍断言 enabled。真实 UI→HTTP 启动与本地 runId、全部 WS 帧、R1/R2 完成和保留断言均保留。复用现有 fireEvent/waitFor，无新增模块或依赖；替换旧两次完整 pointer/focus 设置流程。独立预检确认测试继续使用 userEvent。未提高测试 timeout、未修改生产逻辑或 B4 三秒阈值，也未制造生产 red。
+
+原配置验证：`pnpm exec vitest run src/pages/Sequences.test.tsx -t R1 --reporter verbose` exit 0，1 passed，1941 ms（`a2/r2-focused.log`）；`pnpm exec vitest run src/pages/Sequences.test.tsx src/api/realtime.test.ts` exit 0，8 passed，该状态用例 1700 ms（`a2/r2-affected.log`）；`pnpm typecheck` exit 0（`a2/r2-typecheck.log`）。日志均位于 `.local/repairs-20261015/iris/`。仅测试和文档改变，按授权不重复生产 build 或 B4/完整套件。远端 CI 与最终验收由主控完成；本次提交为 SUBMITTED。
