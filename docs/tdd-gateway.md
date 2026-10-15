@@ -296,3 +296,13 @@ Actual PostgreSQL ACCESS EXCLUSIVE lock on gateway_sessions reproduced the old m
 Group creation retains the existing unique temporary title/creation key for crash recovery. A following idempotent configuration phase applies requested title/address; known Telegram username conflicts retain their concrete422codes, allowing explicit private-link fallback. Pure typed tgerr mapping test passes; vet/build pass. Member-read account selection now excludes accounts that already left, allowing B2 to continue through remaining members. No real create/rename/address/promotion/leave was invoked; no fake RPC/client was added.
 
 R24 controller: actual diagnostic account reproduced30.03s NETWORK_TIMEOUT; safe SDK stage logs revealed initConnection AUTH_KEY_DUPLICATED. A pure SDK-error boundary test failed because retries continued, then passed after reusing ingestGate to cancel the single client and preserve its original error. This validates error/lifecycle handling, not restoration of a revoked credential. Targeted PostgreSQL concurrency/race and terminal tests pass. Telegram req_pq transport probes used no Session. Account link parsing and precise join errors tested without performing live joins.
+
+## R30 主控：取消与排队超时不能误杀 Gateway
+
+2026-10-15：现场 Gateway 两次 exit 0，用户确认未手动停止。旧日志没有退出原因，不能据此断言构建资源占用就是两次现场退出的唯一原因。隔离 PostgreSQL 已复现相同的自动退出路径：已取消的 CheckLease/Save/ExecFenced 被标记为永久丢锁；固定写连接被真实 SQL 占用3秒时，watchdog 的2秒预算在等待互斥锁期间耗尽，随后检查将健康连接标记为丢锁，GET /health 返回503。
+
+RED：`go test . -run 'TestCancelledStoreOperationDoesNotRetireHealthyWriter|TestBusyStoreDoesNotRetireHealthyWriter' -count=1`，三种已取消操作返回 writer lease lost，排队超时同样丢锁且健康检查503（3.890s）。最初一次网络沙箱拒绝连接不计作行为 RED。
+
+修复复用原 PostgresStore、Service 生命周期：拿到互斥锁后，未开始 SQL 的过期请求仅返回 context 错误；只有实际无法证明固定连接仍持锁时才永久失效并关闭服务。真实 SQL 执行中超时仍 fail closed，不恢复旧连接、不跳过写入围栏。错误日志只记录操作和原因分类，不记录 SQL 参数、数据库消息或凭据。Compose Gateway 增加 unless-stopped；新进程仍须重新获得唯一 writer lease，手动 stop 保持停止。
+
+GREEN：最终 `go test -race . -run 'TestCancelledStoreOperationDoesNotRetireHealthyWriter|TestBusyStoreDoesNotRetireHealthyWriter|TestTimedOutDatabaseIOStillRetiresWriter|TestLostPostgresWriterLeaseFailsClosed|TestPostgresOfflineCommandCannotAcquireRunningGatewayLease|TestPostgresDeletedAccountRejectsLateSDKStorageWrites|TestPostgresDeleteCancellationLeavesOtherAccountsAndServiceAvailable|TestPostgresDeleteRollsBackEveryResourceOnStorageFailure|TestPostgresRegistrationSurvivesRestartAndRejectsConcurrentPayload' -count=1` 通过（7.119s），含4种取消操作、真实SQL排队、实际I/O超时、数据库终止持锁连接、重复writer拒绝、删除与重启存储边界。`go vet ./...`通过。均为真实隔离 PostgreSQL + 空账号真实 Gateway，不登录 Telegram；未重跑不受影响的前端与后端测试。本轮按用户要求由主控独立实现和复核。

@@ -162,7 +162,9 @@ func (s *Service) operationContext(parent context.Context) (context.Context, fun
 	stopLease()
 	leaseCancel()
 	if err != nil {
-		s.cancel()
+		if errors.Is(err, ErrWriterLeaseLost) {
+			s.cancel()
+		}
 		return nil, func() {}, err
 	}
 	if err := parent.Err(); err != nil {
@@ -189,7 +191,7 @@ func (s *Service) watchLease() {
 			ctx, cancel := context.WithTimeout(s.ctx, 2*time.Second)
 			err := s.store.CheckLease(ctx)
 			cancel()
-			if err != nil {
+			if errors.Is(err, ErrWriterLeaseLost) {
 				s.cancel()
 				return
 			}

@@ -52,6 +52,8 @@ node scripts/deploy.mjs .local/candidates/<accepted-sha> kapibala-candidate depl
 
 ## Rollback and stop
 
+Gateway 使用 `restart: unless-stopped`。内部存储围栏失效后先关闭旧连接，由容器重启并重新取得唯一写入锁，再恢复已登记账号；不能让旧实例在丢锁后继续发送。`docker compose stop gateway` / `down` 属于显式停止，不会自动拉起。退出日志区分 `signal` 与 `service_unavailable`，写入锁日志只输出检查阶段和错误分类。构建期间仍应保留运行容器，镜像构建成功后才切换目标服务。
+
 每次应用迁移前由操作者备份该项目自己的 PostgreSQL，并记录可恢复的 schema 版本和先前已验收 SHA。备份只存受保护的本地位置，不进 Git/CI。历史候选需提前在本地保留，artifact retention 不是备份策略。
 
 ```powershell

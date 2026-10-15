@@ -59,6 +59,11 @@ func main() {
 		case <-ctx.Done():
 		case <-service.Done():
 		}
+		if ctx.Err() != nil {
+			slog.Info("gateway shutting down", "reason", "signal")
+		} else {
+			slog.Error("gateway shutting down", "reason", "service_unavailable")
+		}
 		shutdown, c := context.WithTimeout(context.Background(), 5*time.Second)
 		defer c()
 		_ = server.Shutdown(shutdown)

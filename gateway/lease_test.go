@@ -2,10 +2,94 @@ package gateway_test
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	gateway "github.com/lbtlm/KapibalaAI_gotd/gateway"
 )
+
+func TestCancelledStoreOperationDoesNotRetireHealthyWriter(t *testing.T) {
+	for _, operation := range []string{"check", "save", "update", "load"} {
+		t.Run(operation, func(t *testing.T) {
+			p := isolatedStore(t)
+			s, server := realServer(t, p)
+			defer s.Close()
+			defer server.Close()
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			var err error
+			switch operation {
+			case "check":
+				err = p.CheckLease(ctx)
+			case "save":
+				err = p.Save(ctx, []byte(`{"cancelled":true}`))
+			case "update":
+				_, err = p.ExecFenced(ctx, "SELECT 1")
+			case "load":
+				_, err = p.Load(ctx)
+			}
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancelled %s must return caller cancellation, got %v", operation, err)
+			}
+			request(t, server, "GET", "/health", nil, 200)
+		})
+	}
+}
+
+func TestBusyStoreDoesNotRetireHealthyWriter(t *testing.T) {
+	p := isolatedStore(t)
+	s, server := realServer(t, p)
+	defer s.Close()
+	defer server.Close()
+	done := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err := p.ExecFenced(ctx, "SELECT pg_sleep(3) /* lease_queue_regression */")
+		done <- err
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		var busy bool
+		if err := p.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND query='SELECT pg_sleep(3) /* lease_queue_regression */' AND wait_event='PgSleep')`).Scan(&busy); err != nil {
+			t.Fatal(err)
+		}
+		if busy {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("writer did not enter the controlled database wait")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := p.CheckLease(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("expired queue wait must return caller deadline, got %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	// Let the watchdog observe its own expired queue wait before checking service life.
+	time.Sleep(300 * time.Millisecond)
+	request(t, server, "GET", "/health", nil, 200)
+}
+
+func TestTimedOutDatabaseIOStillRetiresWriter(t *testing.T) {
+	p := isolatedStore(t)
+	s, server := realServer(t, p)
+	defer s.Close()
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_, err := p.ExecFenced(ctx, "SELECT pg_sleep(2)")
+	if !errors.Is(err, gateway.ErrWriterLeaseLost) {
+		t.Fatalf("uncertain database I/O must retire the writer, got %v", err)
+	}
+	request(t, server, "GET", "/health", nil, 503)
+}
 
 func TestLostPostgresWriterLeaseFailsClosed(t *testing.T) {
 	p := isolatedStore(t)

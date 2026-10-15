@@ -3,9 +3,11 @@ package gateway
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"log/slog"
 	"sync"
 )
 
@@ -67,6 +69,9 @@ func (p *PostgresStore) Load(ctx context.Context) ([]byte, error) {
 	if p.lost {
 		return nil, ErrWriterLeaseLost
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var b []byte
 	err := p.lease.QueryRowContext(ctx, "SELECT data FROM gateway_state WHERE id=1").Scan(&b)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -80,15 +85,16 @@ func (p *PostgresStore) Save(ctx context.Context, b []byte) error {
 	if p.lost {
 		return ErrWriterLeaseLost
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	result, err := p.lease.ExecContext(ctx, `INSERT INTO gateway_state(id,data) SELECT 1,$1 WHERE EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND pid=pg_backend_pid() AND classid=0 AND objid=761231912 AND database=(SELECT oid FROM pg_database WHERE datname=current_database())) ON CONFLICT(id) DO UPDATE SET data=EXCLUDED.data`, b)
 	if err != nil {
-		p.lost = true
-		return fmt.Errorf("%w: %v", ErrWriterLeaseLost, err)
+		return p.loseLease("save", err)
 	}
 	n, err := result.RowsAffected()
 	if err != nil || n != 1 {
-		p.lost = true
-		return ErrWriterLeaseLost
+		return p.loseLease("save_fence", err)
 	}
 	return nil
 }
@@ -103,11 +109,15 @@ func (p *PostgresStore) checkLeaseLocked(ctx context.Context) error {
 	if p.lost {
 		return ErrWriterLeaseLost
 	}
+	// Waiting for another fenced write can consume the caller's deadline.
+	// No SQL was attempted: cancellation says nothing about lease ownership.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	var owned bool
 	err := p.lease.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND pid=pg_backend_pid() AND classid=0 AND objid=761231912 AND database=(SELECT oid FROM pg_database WHERE datname=current_database()))`).Scan(&owned)
 	if err != nil || !owned {
-		p.lost = true
-		return ErrWriterLeaseLost
+		return p.loseLease("check", err)
 	}
 	return nil
 }
@@ -119,12 +129,32 @@ func (p *PostgresStore) ExecFenced(ctx context.Context, query string, args ...an
 	if e := p.checkLeaseLocked(ctx); e != nil {
 		return nil, e
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	result, e := p.lease.ExecContext(ctx, query, args...)
 	if e != nil {
-		p.lost = true
-		return nil, fmt.Errorf("%w: %v", ErrWriterLeaseLost, e)
+		return nil, p.loseLease("update", e)
 	}
 	return result, nil
+}
+
+// Caller holds mu. Log classifications only: SQL errors can contain live data.
+func (p *PostgresStore) loseLease(operation string, err error) error {
+	p.lost = true
+	cause := fmt.Sprintf("%T", err)
+	switch {
+	case err == nil:
+		cause = "ownership_missing"
+	case errors.Is(err, context.Canceled):
+		cause = "context_canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		cause = "deadline_exceeded"
+	case errors.Is(err, sql.ErrConnDone), errors.Is(err, driver.ErrBadConn):
+		cause = "connection_closed"
+	}
+	slog.Error("gateway writer lease lost", "operation", operation, "cause", cause)
+	return fmt.Errorf("%w: %s", ErrWriterLeaseLost, cause)
 }
 func (p *PostgresStore) Close() error {
 	if p.lease != nil {

@@ -47,6 +47,7 @@ services:
   gateway:
     image: kapibala-gateway:${CANDIDATE_SHA:-local}
     build: ./gateway
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgres://kapibala:${POSTGRES_PASSWORD}@postgres:5432/kapibala_telegram_gateway?sslmode=disable
       BIND_HOST: 0.0.0.0
