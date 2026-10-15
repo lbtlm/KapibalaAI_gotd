@@ -1,5 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {allowedSkip} from './go-test.mjs';
 
 const platform = 'github.com/lbtlm/KapibalaAI_gotd/backend/internal/platform';
@@ -28,9 +29,34 @@ test('only the exact dormant subprocess helper can skip platform coverage', () =
 });
 
 test('live-provider skip is explicit and does not exempt enabled live acceptance', () => {
-  const live = {Package:provider,Test:'TestLiveProviderToolConversationAndAudit'};
-  assert.equal(allowedSkip('backend',live,{}),true);
-  assert.equal(allowedSkip('backend',live,{RUN_LIVE_PROVIDER:'true'}),false);
+  for (const name of ['TestLiveProviderToolConversationAndAudit','TestLiveAmbiguousMessageRequestsAuditedReply']) {
+    const live = {Package:provider,Test:name};
+    assert.equal(allowedSkip('backend',live,{}),true,name);
+    assert.equal(allowedSkip('backend',live,{RUN_LIVE_PROVIDER:'false'}),true,name);
+    assert.equal(allowedSkip('backend',live,{RUN_LIVE_PROVIDER:'true'}),false,name);
+    assert.equal(allowedSkip('gateway',live,{}),false,name);
+    assert.equal(allowedSkip('backend',{...live,Package:platform},{}),false,name);
+  }
+  assert.equal(allowedSkip('backend',{Package:provider,Test:'TestLiveOtherProviderCoverage'},{}),false);
+  assert.equal(allowedSkip('backend',{Package:provider,Test:'TestLiveAmbiguousMessageRequestsAuditedReply/subtest'},{}),false);
+});
+
+test('missing database or real gateway configuration never exempts integration coverage', () => {
+  for (const [module,Package,Test] of [
+    ['backend',platform,'TestAccountDeleteAndLeaveAdmissionSerializeAgainstRealEmptyGateway'],
+    ['backend',provider,'TestChatProviderPersistsReasoningAcrossRestartAndValidatesTools'],
+    ['gateway',gateway,'TestPostgresDeletedAccountRejectsLateSDKStorageWrites'],
+  ]) assert.equal(allowedSkip(module,{Package,Test},{}),false,Test);
+});
+
+test('every opt-in live provider test is registered with the CI skip guard', () => {
+  const source = readFileSync(new URL('../backend/internal/provider/live_test.go',import.meta.url),'utf8');
+  const liveTests = [...source.matchAll(/^func (Test\w+)\(t \*testing\.T\) \{/gm)];
+  assert.ok(liveTests.length > 0,'live provider tests must be discovered');
+  for (const [,Test] of liveTests) {
+    assert.equal(allowedSkip('backend',{Package:provider,Test},{}),true,Test);
+    assert.equal(allowedSkip('backend',{Package:provider,Test},{RUN_LIVE_PROVIDER:'true'}),false,Test);
+  }
 });
 
 test('a package-level skip requires observed no-test-files compilation evidence', () => {

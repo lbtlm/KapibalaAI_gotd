@@ -9,7 +9,9 @@ export function allowedSkip(module,event,env=process.env,compiledOnly=new Set())
   if (event.Package === 'github.com/lbtlm/KapibalaAI_gotd/backend/internal/platform' && event.Test === 'TestServerProcessHelper') {
     return env.KAPIBALA_CHILD_SERVER !== 'true';
   }
-  return event.Package === 'github.com/lbtlm/KapibalaAI_gotd/backend/internal/provider' && event.Test === 'TestLiveProviderToolConversationAndAudit' && env.RUN_LIVE_PROVIDER !== 'true';
+  return event.Package === 'github.com/lbtlm/KapibalaAI_gotd/backend/internal/provider'
+    && ['TestLiveProviderToolConversationAndAudit','TestLiveAmbiguousMessageRequestsAuditedReply'].includes(event.Test)
+    && env.RUN_LIVE_PROVIDER !== 'true';
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
