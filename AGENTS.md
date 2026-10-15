@@ -13,7 +13,7 @@
 ## Execution and ownership
 
 - The controller owns integration, branch changes, commits/push, PRs and final acceptance. Workers in this shared checkout must not switch branches, commit or push independently.
-- Read `docs/implementation-contract.md` and the normative examination document before implementing. Respect ownership boundaries and preserve other workers' changes.
+- Read `docs/implementation-contract.md`, `docs/api-flow-coverage.md` and the relevant acceptance criteria in `docs/requirements-audit.md` before implementing. Respect ownership boundaries and preserve other workers' changes.
 - Follow TDD: run a meaningful failing behavior test, implement the smallest correct slice, then verify it passes. Record concise red/green evidence in the component TDD document.
 - Reuse and adapt the user's existing modules before adding implementations. Record source repository, commit and path. Do not copy credentials, live databases, backups or unrelated features.
 - Authentication, persistence, concurrency and crash recovery require independent review of a stable snapshot and relevant integration evidence.

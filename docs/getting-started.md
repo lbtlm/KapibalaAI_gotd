@@ -6,22 +6,45 @@
 
 ## Docker Compose
 
-需要 Docker Engine / Docker Desktop 和 Compose v2。Go、Node.js 和 pnpm 由镜像构建阶段使用，本机不必另装。当前待评审代码在 [PR #5](https://github.com/lbtlm/KapibalaAI_gotd/pull/5)，请先检出正确分支。
+需要 Docker Engine / Docker Desktop（Linux 容器）和 Compose v2。Go、Node.js、pnpm 和 PostgreSQL 都由容器提供，本机不必另装。网络需要能拉取镜像、下载构建依赖，以及访问 Telegram 和选定模型 API。新机器默认克隆 `main` 稳定分支，或检出指定交付提交；`dev` 用于开发集成。
+
+### 配置文件如何读取
+
+统一使用仓库根目录 `.env`，与 `compose.yaml` 放在一起；所有命令都在仓库根目录执行。路径按自己的克隆位置替换：
 
 ```powershell
 Set-Location D:\web_projects\kapibala_ai
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-编辑 `.env`：将 `POSTGRES_PASSWORD` 改为仅含字母、数字、`-`、`_` 的随机密码；已有数据库继续使用原密码。默认 `CONSOLE_PORT=5173`，若被占用可改为其他本机端口。`.env` 已被 Git 忽略。
+这一步只创建不存在的文件，不能覆盖已有数据库对应的配置。编辑 `.env` 后再继续：
+
+| 项目 | 配置要求 |
+| --- | --- |
+| `POSTGRES_PASSWORD` | 新库填写随机密码，仅含字母、数字、`-`、`_`，以便用于数据库连接 URL；已有库保持原密码 |
+| `AGENT_MODE` | 模板显式设置 `openai`，需要真实密钥；无密钥的固定回复演示才使用 `scripted` |
+| `OPENAI_API_KEY` | 真实 AI 必填，只填密钥值；已有 `.local` 私有配置中的值也需填入此项 |
+| `OPENAI_BASE_URL` / `OPENAI_MODEL` / `OPENAI_API_STYLE` | 使用密钥实际支持的地址、模型与协议，具体见下方真实 AI 说明 |
+| `CANDIDATE_SHA` | 新机器本地构建保持 `local`；不要填没有构建或载入过的 SHA 标签后使用 `--no-build` |
+| `CONSOLE_PORT` / `MEDIA_RETENTION_DAYS` | 默认 `5173` / `30`；端口冲突时修改端口并同步修改访问 URL |
+
+`.env.example` 仅为模板；`.local` 中的 JSON、纯密钥文本、其他 env 文件不会被自动读取。`OPENAI_API_KEY` 不能填写文件路径，也没有 `OPENAI_API_KEY_FILE` 自动读取机制。无需改代码或把私有文件打进镜像。
+
+Compose 从根目录 `.env` 插值配置，再将 `compose.yaml` 声明的环境变量传入对应容器；当前终端的同名环境变量优先于 `.env`，若修改看似未生效，应检查并清除旧终端覆盖。规则见 [Docker 环境变量文档](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/)。`.env` 已在 Git 和镜像构建中忽略，不把真实配置写进 `.env.example`。
+
+### 构建与启动
 
 ```powershell
+Set-Location D:\web_projects\kapibala_ai
+docker compose -p kapibala-demo config --quiet
 docker compose -p kapibala-demo build
+# 构建成功后才继续；不需要先停止正在运行的服务。
 docker compose -p kapibala-demo up -d --no-build
+docker compose -p kapibala-demo ps -a
 Invoke-RestMethod http://127.0.0.1:5173/api/health
 ```
 
-启动顺序为 PostgreSQL 健康 → 显式业务迁移与独立网关库初始化 → 服务 → 控制台。健康接口应返回 `ok:true` 和 `schemaVersion`；当前业务基线为 schema 12。打开 [控制台](http://127.0.0.1:5173)。若调整端口，上述 URL 同步调整。
+启动顺序为 PostgreSQL 健康 → 业务迁移与独立网关库初始化 → 服务 → 控制台；无需手动建库或单独运行迁移。`config --quiet` 只检查 Compose 配置，不验证 API key；缺少密钥时 `openai` Agent 会拒绝启动。启动可能需要数秒，健康接口应返回 `ok:true` 和 `schemaVersion:12`，然后打开 [控制台](http://127.0.0.1:5173)。若调整端口，上述 URL 同步调整。
 
 | 服务 | 容器内端口 | 数据与暴露范围 |
 | --- | --- | --- |
@@ -31,14 +54,16 @@ Invoke-RestMethod http://127.0.0.1:5173/api/health
 | agent | 8082 | 独立进程，复用业务库保存 provider 会话 |
 | postgres | 5432 | `postgres-data` 卷；不公开宿主端口 |
 
+`ps -a` 中这五个服务应处于运行状态，postgres 应为 healthy。`migrate` 和 `gateway-db` 为一次性任务，`Exited (0)` 是成功；非零退出时先查它们的日志。业务 `/api/health` 正常不代表模型密钥可用，真实模型要通过页面预演验证。
+
 ```powershell
-docker compose -p kapibala-demo ps
+Set-Location D:\web_projects\kapibala_ai
 docker compose -p kapibala-demo logs --tail 100 backend gateway agent
 # 停止并保留数据。
 docker compose -p kapibala-demo down
 ```
 
-不要用 `down --volumes` 停止需要保留的环境。镜像先构建成功再切换服务；升级迁移前备份，不能把停止运行中的 gateway 当作构建前置步骤。原制品部署与回滚使用 [运维说明](operations.md) 中的流程。
+不要用 `down --volumes` 停止需要保留的环境。项目名 `kapibala-demo` 决定卷名称，已有环境不要随意换名。新机器仅复制配置会创建空数据库，不会带入原账号、群、消息、Agent 上下文和媒体；迁移这些数据需要恢复数据库与媒体卷，按 [运维说明](operations.md) 执行。镜像先构建成功再切换服务；升级迁移前备份，不能把停止运行中的 gateway 当作构建前置步骤。
 
 ## 账号与真实 AI
 
@@ -46,7 +71,7 @@ docker compose -p kapibala-demo down
 
 上传同名 `.session` 与 `.json`，确认资料后点击“连接并检测”。上传不自动连接，检测成功才是 Telegram 身份验证。账号同步群不会自动创建管理工作区或开启 Agent。已有 manifest 安装需要迁移时，使用 [Gateway 离线采用流程](../gateway/README.md)，不要把旧模拟数据当作真实凭据。
 
-默认 `AGENT_MODE=scripted` 用于无密钥的固定协议回复。真实模型在 `.env` 中配置：
+根目录 `.env` 中的真实 AI 配置如下。`openai` 是 OpenAI-compatible 适配模式名，DeepSeek 同样使用它；不是必须购买 OpenAI 服务：
 
 ```dotenv
 AGENT_MODE=openai
@@ -56,13 +81,41 @@ OPENAI_MODEL=deepseek-flash
 OPENAI_API_KEY=替换为自己的密钥
 ```
 
+`OPENAI_BASE_URL` 是 API 基础地址，代码会追加 `/chat/completions`（或 Responses 模式的 `/responses`），不要填写完整请求端点。模型名必须是该密钥可用的模型，不保证所有兼容服务都支持模板中的默认模型。值含 `$` 或 `#` 时用单引号包住密钥，避免 dotenv 插值或注释解析。
+
+配置值只转发到 provider，前端和网关不接触模型密钥。模板现在显式使用 `openai`：未填 key 会拒绝启动，填错或额度不足则在调用时失败，不会偷偷改成固定回复。仅想无密钥启动页面时可主动设置 `AGENT_MODE=scripted`，但固定文案不是 AI；AI 回复预演和 AI 剧本生成仍需要有效密钥。省略 `AGENT_MODE` 时，Compose 为兼容旧配置默认使用 scripted。Responses 适配见 [Backend / Agent 说明](../backend/README.md)，真实 Responses 端点尚未实测。
+
+群内自动回复按以下顺序启用：
+
+1. 上传有效 Session + JSON，主动连接并检测成功。
+2. 创建或导入群，绑定在线、已入群且具有发送权限的管理员；执行身份不会回退到其他账号。
+3. 在群管理开启“Agent 自动响应”，确保群未暂停、未结束；暂停后需明确恢复。
+4. 由外部成员发送一条新消息。只有外部新消息触发；剧本、自有账号手动消息和 Agent 回复不触发。恢复不会回放暂停期间的消息，剧本也需重新预检确认。
+
+同群同时最多一个 run，run 完成后群 Agent 继续待命。先用“AI 回复预演”确认真实模型调用，再检查群内 Agent 步骤、审计和实际投递状态；预演不发群消息，也不能代替群内投递验证。
+
+### 修改配置后如何生效
+
+只修改 `AGENT_MODE` 或 `OPENAI_*` 时，运行以下命令重新创建 agent 容器。适用于整套服务已经启动的环境，不会连带重启 gateway：
+
 ```powershell
-docker compose -p kapibala-demo up -d --no-deps agent
+Set-Location D:\web_projects\kapibala_ai
+docker compose -p kapibala-demo config --quiet
+docker compose -p kapibala-demo up -d --no-build --no-deps agent
+docker compose -p kapibala-demo logs --tail 100 agent
 ```
 
-配置值只转发到 provider，前端和网关不接触模型密钥。模型和服务地址以自己可用的配置为准；上表是项目当前默认配置。Responses 适配见 [Backend / Agent 说明](../backend/README.md)，真实 Responses 端点尚未实测。
+**不要用 `docker compose restart` 加载新配置**，它只重启旧容器，不更新环境变量；[Docker 官方说明](https://docs.docker.com/reference/cli/docker/compose/restart/)明确了这个区别。`up` 会检测配置变化并重建对应容器。无需为了换 key 重新编译镜像。
 
-群内自动回复还需要：管理员在线且属于该群、Agent 开关开启、群未暂停或结束、新消息来自外部成员。剧本、自有账号手动发送和 Agent 回复不会再触发 Agent。AI 回复预演和 AI 剧本生成会调用真实模型，但预览本身不会发送群消息。
+| 改动 | 根目录执行的命令 / 处理方式 |
+| --- | --- |
+| `CONSOLE_PORT` | `docker compose -p kapibala-demo up -d --no-build --no-deps frontend`，之后访问新端口 |
+| `MEDIA_RETENTION_DAYS` | `docker compose -p kapibala-demo up -d --no-build --no-deps backend` |
+| 更新应用代码 | 先 `docker compose -p kapibala-demo build`，成功后 `docker compose -p kapibala-demo up -d --no-build`，由 Compose 执行所需迁移 |
+| 服务停止后重新启动 | `docker compose -p kapibala-demo up -d --no-build`；没有本地镜像时先构建 |
+| `POSTGRES_PASSWORD` | 已有数据库不会因改 env 自动改密码；开发验证保留原值，密码轮换需同时修改数据库角色与连接配置 |
+
+遇到 `OPENAI_API_KEY is required`，检查根目录 `.env` 的值是否为空；`PROVIDER_ERROR` / `AUDIT_UNAVAILABLE` 则检查模型地址、协议、模型名、密钥权限和容器网络。保留原文件，不要重复复制模板覆盖已填写配置。排查时使用 `config --quiet` 校验结构，避免将含真实密钥的完整 `config` 输出发到日志或截图。
 
 ## 原生开发
 
