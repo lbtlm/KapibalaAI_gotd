@@ -1,0 +1,7 @@
+.local
+media
+bin
+*.exe
+*.test
+.env
+.env.*

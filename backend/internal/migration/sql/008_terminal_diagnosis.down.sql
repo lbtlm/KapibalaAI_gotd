@@ -1,0 +1,1 @@
+-- Data correction is retained on downgrade; do not restore overwritten diagnoses.

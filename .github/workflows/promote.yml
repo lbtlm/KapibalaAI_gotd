@@ -1,0 +1,55 @@
+name: Prepare accepted candidate
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful release PR CI run (or historical push / manual full on dev/main)
+        required: true
+      accepted_sha:
+        description: Exact accepted candidate SHA (release PR uses tested merge SHA, not dev HEAD)
+        required: true
+      purpose:
+        description: Manual operator action after download
+        type: choice
+        options: [deploy, rollback]
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  prepare:
+    name: Verify immutable candidate for manual operation
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ inputs.run_id }}
+      ACCEPTED_SHA: ${{ inputs.accepted_sha }}
+      PURPOSE: ${{ inputs.purpose }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+      - name: Require current successful CI evidence for the exact SHA
+        run: |
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$ACCEPTED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" > run.json
+          SOURCE_SHA="$(jq -r '.head_sha' run.json)"
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/commits/$ACCEPTED_SHA" > candidate-commit.json
+          gh api "repos/$GITHUB_REPOSITORY/commits/$SOURCE_SHA" > source-commit.json
+          node scripts/ci-policy.mjs candidate
+      - name: Download the original candidate; never rebuild
+        run: |
+          gh run download "$RUN_ID" --name "$CANDIDATE_NAME" --dir candidate
+          cd candidate
+          sha256sum --check SHA256SUMS
+          test "$(cat COMMIT_SHA)" = "$ACCEPTED_SHA"
+          printf 'Verified CI run: %s\nAccepted commit: %s\nAccepted tree: %s\nOperator purpose: %s\nNo deployment performed by this workflow.\n' "$RUN_ID" "$ACCEPTED_SHA" "$CANDIDATE_TREE" "$PURPOSE" > PROMOTION.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: accepted-${{ inputs.accepted_sha }}-${{ inputs.purpose }}-${{ github.run_id }}
+          path: candidate/
+          if-no-files-found: error
+          retention-days: 14

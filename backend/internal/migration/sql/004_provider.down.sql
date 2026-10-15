@@ -1,0 +1,1 @@
+DROP TABLE provider_audits,provider_script,provider_tool_items,provider_turns;

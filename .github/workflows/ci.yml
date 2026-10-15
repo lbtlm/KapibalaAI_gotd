@@ -1,0 +1,266 @@
+name: CI
+on:
+  pull_request:
+    branches: [dev, main]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Explicit full verification (optional rerun)
+        type: choice
+        options: [full]
+        default: full
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    name: Branch and commit policy
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.changes.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+      - run: node --test scripts/*.test.mjs
+      - run: node scripts/ci-policy.mjs
+      - id: changes
+        name: Select docs, development light or release full
+        run: node scripts/ci-policy.mjs mode
+
+  go_light:
+    name: Go domain unit tests (light)
+    needs: policy
+    if: needs.policy.outputs.mode == 'light'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache-dependency-path: backend/go.sum
+      - run: go test -count=1 ./internal/domain
+        working-directory: backend
+
+  go:
+    name: Go / PostgreSQL / race / vet
+    needs: policy
+    if: needs.policy.outputs.mode == 'full'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kapibala
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: kapibala_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U kapibala -d kapibala_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://kapibala:ci-only@127.0.0.1:5432/kapibala_test?sslmode=disable
+      GATEWAY_TEST_DATABASE_URL: postgres://kapibala:ci-only@127.0.0.1:5432/kapibala_gateway_test?sslmode=disable
+      TEST_ACCOUNT_DELETE_GATEWAY_URL: http://127.0.0.1:18081
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache-dependency-path: |
+            backend/go.sum
+            gateway/go.sum
+      - name: Create the separate gateway test databases
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec "$PG_CONTAINER" createdb -U kapibala kapibala_gateway_test
+          docker exec "$PG_CONTAINER" createdb -U kapibala kapibala_delete_gateway_test
+      - name: Start the real empty gateway for account deletion integration
+        env:
+          DATABASE_URL: postgres://kapibala:ci-only@127.0.0.1:5432/kapibala_delete_gateway_test?sslmode=disable
+          BIND_HOST: 127.0.0.1
+          PORT: '18081'
+          GATEWAY_MODE: telegram
+        run: |
+          mkdir -p .local
+          (cd gateway && go build -o ../.local/delete-gateway ./cmd/gateway)
+          .local/delete-gateway > .local/delete-gateway.log 2>&1 &
+          echo $! > .local/delete-gateway.pid
+          for attempt in {1..60}; do
+            if curl --fail --silent "$TEST_ACCOUNT_DELETE_GATEWAY_URL/health"; then exit 0; fi
+            sleep 1
+          done
+          cat .local/delete-gateway.log
+          exit 1
+      - run: node scripts/go-test.mjs backend
+      - run: node scripts/go-test.mjs gateway
+      - run: node scripts/go-test.mjs backend -race
+      - run: node scripts/go-test.mjs gateway -race
+      - run: go vet ./...
+        working-directory: backend
+      - run: go vet ./...
+        working-directory: gateway
+      - name: Stop the owned empty gateway
+        if: always()
+        run: |
+          if [ -f .local/delete-gateway.pid ]; then
+            kill "$(cat .local/delete-gateway.pid)" 2>/dev/null || true
+          fi
+
+  frontend:
+    name: Frontend unit / types (build on full)
+    needs: policy
+    if: needs.policy.outputs.mode == 'light' || needs.policy.outputs.mode == 'full'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      - run: pnpm test
+        working-directory: frontend
+      - run: pnpm typecheck
+        working-directory: frontend
+      - run: pnpm build
+        if: needs.policy.outputs.mode == 'full'
+        working-directory: frontend
+
+  e2e:
+    name: Real services empty-account browser
+    needs: policy
+    if: needs.policy.outputs.mode == 'full'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kapibala
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: kapibala_e2e
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U kapibala -d kapibala_e2e"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      E2E_DATABASE_URL: postgres://kapibala:ci-only@127.0.0.1:5432/kapibala_e2e?sslmode=disable
+      E2E_GATEWAY_DATABASE_URL: postgres://kapibala:ci-only@127.0.0.1:5432/kapibala_gateway_e2e?sslmode=disable
+      E2E_STACK_COMMAND: node scripts/local-stack.mjs
+      E2E_BASE_URL: http://127.0.0.1:15173
+      E2E_API_URL: http://127.0.0.1:18080
+      BACKEND_PORT: '18080'
+      GATEWAY_PORT: '18081'
+      AGENT_PORT: '18082'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache-dependency-path: |
+            backend/go.sum
+            gateway/go.sum
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: frontend
+      - name: Create the separate empty gateway database
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: docker exec "$PG_CONTAINER" createdb -U kapibala kapibala_gateway_e2e
+      - run: pnpm test:e2e
+        working-directory: frontend
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-failure-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 7
+
+  artifact:
+    name: Immutable candidate images
+    needs: [policy, go, frontend, e2e]
+    if: needs.policy.outputs.mode == 'full'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CANDIDATE_SHA: ${{ github.sha }}
+      COMPOSE_PROJECT_NAME: kapibala-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      POSTGRES_PASSWORD: ci-only
+      CONSOLE_PORT: '15173'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+      - name: Build images for the tested commit
+        run: |
+          docker compose build
+      - name: Run the same candidate images and verify container HTTP contracts
+        run: |
+          docker compose -f compose.yaml -f compose.ci.yaml up -d --no-build
+          node scripts/compose-smoke.mjs http://127.0.0.1:15173 http://127.0.0.1:18081 http://127.0.0.1:18082
+      - name: Candidate container failure diagnostics
+        if: failure()
+        run: docker compose -f compose.yaml -f compose.ci.yaml logs --tail 100
+      - name: Clean only this disposable CI project
+        if: always()
+        run: docker compose -f compose.yaml -f compose.ci.yaml down --volumes --remove-orphans
+      - name: Package the verified original images
+        run: |
+          mkdir -p candidate
+          docker save "kapibala-backend:$CANDIDATE_SHA" "kapibala-gateway:$CANDIDATE_SHA" "kapibala-frontend:$CANDIDATE_SHA" | gzip > candidate/images.tar.gz
+          cp compose.yaml candidate/compose.yaml
+          printf '%s\n' "$CANDIDATE_SHA" > candidate/COMMIT_SHA
+          cd candidate
+          sha256sum images.tar.gz compose.yaml COMMIT_SHA > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidate-${{ github.sha }}-${{ github.run_attempt }}
+          path: candidate/
+          if-no-files-found: error
+          retention-days: 14
+
+  gate:
+    name: CI Gate
+    if: always()
+    needs: [policy, go_light, go, frontend, e2e, artifact]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+      - run: node scripts/ci-policy.mjs gate
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
