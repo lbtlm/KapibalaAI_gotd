@@ -3,9 +3,14 @@ on:
   pull_request:
     branches: [dev, main]
     types: [opened, synchronize, reopened, edited, ready_for_review]
-  push:
-    branches: [dev, main]
   workflow_dispatch:
+    inputs:
+      profile:
+        description: Explicit full verification (optional rerun)
+        type: choice
+        options: [full]
+        default: full
+        required: true
 permissions:
   contents: read
 concurrency:
@@ -28,8 +33,23 @@ jobs:
       - run: node --test scripts/*.test.mjs
       - run: node scripts/ci-policy.mjs
       - id: changes
-        name: Classify all changed paths (unknown defaults to full)
+        name: Select docs, development light or release full
         run: node scripts/ci-policy.mjs mode
+
+  go_light:
+    name: Go domain unit tests (light)
+    needs: policy
+    if: needs.policy.outputs.mode == 'light'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache-dependency-path: backend/go.sum
+      - run: go test -count=1 ./internal/domain
+        working-directory: backend
 
   go:
     name: Go / PostgreSQL / race / vet
@@ -100,9 +120,9 @@ jobs:
           fi
 
   frontend:
-    name: Frontend unit / types / build
+    name: Frontend unit / types (build on full)
     needs: policy
-    if: needs.policy.outputs.mode == 'full'
+    if: needs.policy.outputs.mode == 'light' || needs.policy.outputs.mode == 'full'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -121,6 +141,7 @@ jobs:
       - run: pnpm typecheck
         working-directory: frontend
       - run: pnpm build
+        if: needs.policy.outputs.mode == 'full'
         working-directory: frontend
 
   e2e:
@@ -221,7 +242,7 @@ jobs:
   gate:
     name: CI Gate
     if: always()
-    needs: [policy, go, frontend, e2e, artifact]
+    needs: [policy, go_light, go, frontend, e2e, artifact]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
