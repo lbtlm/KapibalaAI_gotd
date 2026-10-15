@@ -279,15 +279,15 @@ func platformError(err error) *APIError {
 		return &APIError{429, "RATE_LIMITED", int((wait + time.Second - 1) / time.Second)}
 	}
 	code := strings.ToUpper(err.Error())
-	for _, match := range []string{"USER_DEACTIVATED", "PHONE_NUMBER_BANNED", "USER_RESTRICTED"} {
-		if strings.Contains(code, match) {
-			return &APIError{403, "ACCOUNT_SUSPENDED", 0}
-		}
+	permanentCode := code
+	if rpc, ok := tgerr.As(err); ok {
+		permanentCode = rpc.Type
 	}
-	for _, match := range []string{"AUTH_KEY_UNREGISTERED", "AUTH_KEY_INVALID", "SESSION_REVOKED", "SESSION_EXPIRED"} {
-		if strings.Contains(code, match) {
-			return &APIError{401, "SESSION_EXPIRED", 0}
-		}
+	switch permanentCode {
+	case "USER_DEACTIVATED", "USER_DEACTIVATED_BAN", "PHONE_NUMBER_BANNED", "USER_RESTRICTED":
+		return &APIError{403, "ACCOUNT_SUSPENDED", 0}
+	case "AUTH_KEY_UNREGISTERED", "AUTH_KEY_INVALID", "SESSION_REVOKED", "SESSION_EXPIRED":
+		return &APIError{401, "SESSION_EXPIRED", 0}
 	}
 	if strings.Contains(code, "INVITE_HASH_EXPIRED") || strings.Contains(code, "INVITE_HASH_INVALID") {
 		return &APIError{410, "INVITE_EXPIRED", 0}
