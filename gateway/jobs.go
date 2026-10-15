@@ -8,7 +8,7 @@ func (s *Service) emit(kind string, data map[string]any) {
 }
 func (s *Service) terminal(aid, status string) {
 	a := s.state.Accounts[aid]
-	if a == nil {
+	if a == nil || a.Status == "suspended" || a.Status == "session_expired" {
 		return
 	}
 	a.Status = status

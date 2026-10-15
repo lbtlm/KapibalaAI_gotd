@@ -35,3 +35,31 @@ func TestTerminalTransitionRemovesMembershipAndEndsConnection(t *testing.T) {
 		t.Fatal("terminal transition failed to preserve account/membership invariants")
 	}
 }
+
+func TestTerminalTransitionIgnoresRepeatedAndConflictingTerminalSignals(t *testing.T) {
+	for _, first := range []struct {
+		status, later, code string
+		httpStatus          int
+	}{{"session_expired", "suspended", "SESSION_EXPIRED", 401}, {"suspended", "session_expired", "ACCOUNT_SUSPENDED", 403}} {
+		t.Run(first.status, func(t *testing.T) {
+			s := &Service{state: initialState()}
+			s.state.Accounts["a"] = &account{Status: "online", PlatformID: "123", ConnectionID: "current"}
+			s.state.Groups["g"] = &group{Members: map[string]bool{"123": true, "456": true}}
+			s.terminal("a", first.status)
+			if len(s.state.Events) != 2 || s.state.Groups["g"].Members["123"] || !s.state.Groups["g"].Members["456"] || !s.state.Accounts["a"].EndedConnections["current"] {
+				t.Fatal("first permanent signal lost its membership/connection cleanup")
+			}
+			s.terminal("a", first.status)
+			s.terminal("a", first.later)
+			if s.state.Accounts["a"].Status != first.status || len(s.state.Events) != 2 || s.state.Events[0].Data["status"] != first.status {
+				t.Fatal("late terminal signals changed the permanent reason or emitted another transition")
+			}
+			for _, online := range []bool{false, true} {
+				err, ok := s.accountError("a", online).(*APIError)
+				if !ok || err.Code != first.code || err.Status != first.httpStatus {
+					t.Fatal("later account requests lost the specific permanent error")
+				}
+			}
+		})
+	}
+}
