@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/jackc/pgx/v5"
 	"net/http"
 	"time"
@@ -108,6 +109,7 @@ type jobState struct {
 	JoinStarted     *time.Time `json:"joinStarted"`
 	ExpiredRetries  int        `json:"expiredRetries"`
 	PromoteAttempts int        `json:"promoteAttempts"`
+	PromoteStage    string     `json:"promoteStage,omitempty"`
 	WaitUntil       time.Time  `json:"waitUntil"`
 }
 type jobError struct {
@@ -341,39 +343,75 @@ func (a *App) runJob(ctx context.Context, id string) error {
 		}
 		return a.jobFail(ctx, id, "join:"+account, code)
 	case "promote":
-		if s.PromoteAttempts >= 2 {
-			return a.jobFail(ctx, id, "promote", "NOT_MEMBER_YET")
-		}
-		s.PromoteAttempts++
-		if e = a.jobSave(ctx, id, s); e != nil {
-			return e
+		legacyUnknown := s.PromoteStage == "" && s.PromoteAttempts > 0
+		if !legacyUnknown && s.PromoteStage != "prepared" {
+			if s.PromoteAttempts >= 2 {
+				return a.jobFail(ctx, id, "promote", "NOT_MEMBER_YET")
+			}
+			s.PromoteAttempts++
+			s.PromoteStage = "prepared"
+			if e = a.jobSave(ctx, id, s); e != nil {
+				return e
+			}
 		}
 		g, e := a.readGroup(ctx, *groupID)
 		if e != nil {
 			return e
 		}
-		e = a.gateway(ctx, "POST", "/groups/"+*g.GatewayGroupID+"/promote", map[string]any{"byAccountId": s.Creator, "accountId": s.Members[0]}, nil)
+		var members []struct {
+			PlatformUserID string `json:"platformUserId"`
+			Role           string `json:"role"`
+		}
+		if e = a.gateway(ctx, "GET", "/groups/"+*g.GatewayGroupID+"/members", nil, &members); e != nil {
+			return e
+		}
+		var target string
+		if e = a.pool.QueryRow(ctx, `SELECT platform_user_id FROM accounts WHERE id=$1`, s.Members[0]).Scan(&target); e != nil {
+			return e
+		}
+		for _, m := range members {
+			if m.PlatformUserID == target && m.Role == "admin" {
+				return a.finishPromote(ctx, id, *groupID, s.Members[0])
+			}
+		}
+		if legacyUnknown {
+			// Old checkpoints have no gateway receipt key. Lack of an admin role
+			// cannot prove whether their unkeyed request reached the platform.
+			return nil
+		}
+		key := fmt.Sprintf("%s:promote:%d", id, s.PromoteAttempts)
+		e = a.gateway(ctx, "POST", "/groups/"+*g.GatewayGroupID+"/promote", map[string]any{"byAccountId": s.Creator, "accountId": s.Members[0], "idempotencyKey": key}, nil)
 		if e != nil {
-			if externalCode(e) == "NOT_MEMBER_YET" && s.PromoteAttempts < 2 {
+			code := externalCode(e)
+			if code == "NETWORK_TIMEOUT" || code == "GATEWAY_UNAVAILABLE" {
+				s.WaitUntil = time.Now().Add(200 * time.Millisecond)
+				return a.jobSave(ctx, id, s)
+			}
+			if code == "NOT_MEMBER_YET" && s.PromoteAttempts < 2 {
+				s.PromoteStage = "retry"
 				s.WaitUntil = time.Now().Add(time.Second)
 				return a.jobSave(ctx, id, s)
 			}
-			return a.jobFail(ctx, id, "promote", externalCode(e))
+			return a.jobFail(ctx, id, "promote", code)
 		}
-		tx, e := a.pool.Begin(ctx)
-		if e != nil {
-			return e
-		}
-		defer tx.Rollback(ctx)
-		if _, e = tx.Exec(ctx, `UPDATE members SET role='admin' WHERE group_id=$1 AND account_id=$2`, *groupID, s.Members[0]); e != nil {
-			return e
-		}
-		if _, e = tx.Exec(ctx, `UPDATE jobs SET status='finished' WHERE id=$1`, id); e != nil {
-			return e
-		}
-		return tx.Commit(ctx)
+		return a.finishPromote(ctx, id, *groupID, s.Members[0])
 	}
 	return nil
+}
+
+func (a *App) finishPromote(ctx context.Context, id, groupID, account string) error {
+	tx, e := a.pool.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
+	if _, e = tx.Exec(ctx, `UPDATE members SET role='admin' WHERE group_id=$1 AND account_id=$2`, groupID, account); e != nil {
+		return e
+	}
+	if _, e = tx.Exec(ctx, `UPDATE jobs SET status='finished' WHERE id=$1`, id); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
 }
 func (a *App) runLeave(ctx context.Context, id string, groupID *string, s jobState, errs []jobError) error {
 	if s.Position >= len(s.Members) {

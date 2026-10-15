@@ -104,6 +104,17 @@ func (a *App) saveAgent(ctx context.Context, r *agentRun) error {
 		return e
 	}
 	defer tx.Rollback(ctx)
+	if r.Pending == nil || r.Status != "running" {
+		var enabled bool
+		var status string
+		if e = tx.QueryRow(ctx, `SELECT agent_enabled,status FROM groups WHERE id=$1 FOR SHARE`, r.GroupID).Scan(&enabled, &status); e != nil {
+			return e
+		}
+		if !enabled || status != "active" {
+			endAgent(r, "cancelled", "")
+			r.Summary = nil
+		}
+	}
 	tag, e := tx.Exec(ctx, `UPDATE agent_runs SET status=$2,end_reason=$3,summary=$4,history=$5,steps=$6,pending=$7,protocol_errors=$8 WHERE id=$1 AND status='running' AND execution_epoch=$9`, r.ID, r.Status, r.EndReason, r.Summary, r.History, r.Steps, r.Pending, r.ProtocolErrors, r.Epoch)
 	if e != nil {
 		return e
@@ -135,7 +146,7 @@ func truncateBytes(s string, n int) string {
 }
 func endAgent(r *agentRun, reason, summary string) {
 	r.EndReason = &reason
-	if summary != "" {
+	if reason == "final" {
 		r.Summary = &summary
 	}
 	switch reason {
@@ -379,9 +390,15 @@ func (a *App) executeAgent(ctx context.Context, id string) error {
 				var client string
 				e = a.pool.QueryRow(ctx, `SELECT client_msg_id FROM agent_effects WHERE run_id=$1 AND key=$2`, r.ID, "send:"+input["idempotency_key"].(string)).Scan(&client)
 				if e == nil {
-					result, e = a.currentAgentSend(ctx, client)
-					if e != nil {
-						return e
+					if p.AuditVerdict == "pass" {
+						// Only the interrupted original tool has a persisted pass.
+						// A new tool reusing the key bypasses audit and returns now.
+						result, code = a.waitAgentSend(ctx, client)
+					} else {
+						result, e = a.currentAgentSend(ctx, client)
+						if e != nil {
+							return e
+						}
 					}
 					cached = true
 				} else if e != pgx.ErrNoRows {
@@ -598,8 +615,9 @@ func (a *App) agentSend(ctx context.Context, r *agentRun, input map[string]any) 
 	var existing string
 	e = tx.QueryRow(ctx, `SELECT client_msg_id FROM agent_effects WHERE run_id=$1 AND key=$2`, r.ID, key).Scan(&existing)
 	if e == nil {
-		result, e := a.currentAgentSend(ctx, existing)
-		return result, "", e
+		tx.Rollback(ctx)
+		result, code := a.waitAgentSend(ctx, existing)
+		return result, code, nil
 	}
 	if e != pgx.ErrNoRows {
 		return nil, "", e

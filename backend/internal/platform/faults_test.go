@@ -17,7 +17,11 @@ func accountStatus(t *testing.T, s *httptest.Server, token, id string) string {
 	t.Helper()
 	req, _ := http.NewRequest("GET", s.URL+"/api/accounts", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
-	r, e := s.Client().Do(req)
+	client := s.Client()
+	if client == nil {
+		client = http.DefaultClient
+	}
+	r, e := client.Do(req)
 	if e != nil {
 		t.Fatal(e)
 	}

@@ -138,6 +138,12 @@ func (a *App) connect(w http.ResponseWriter, r *http.Request) error {
 	if status != "idle" && status != "disconnected" {
 		return fail(409, "ILLEGAL_TRANSITION")
 	}
+	// Complete every older offline intent while holding the same account lock.
+	// A request interrupted after dispatch remains pending and must finish before
+	// a new connection can be established, including after process reconstruction.
+	if e = a.finishDisconnects(ctx, tx, id); e != nil {
+		return e
+	}
 	var out struct {
 		PlatformUserID string `json:"platformUserId"`
 	}
@@ -174,18 +180,31 @@ func (a *App) connect(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 func (a *App) disconnectActions(ctx context.Context) {
-	rows, e := a.pool.Query(ctx, `SELECT id,account_id FROM gateway_actions WHERE status='pending'`)
-	if e != nil {
-		return
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id, account string
-		if rows.Scan(&id, &account) != nil {
+	for _, account := range a.ids(ctx, `SELECT DISTINCT account_id FROM gateway_actions WHERE status='pending'`) {
+		tx, e := a.pool.Begin(ctx)
+		if e != nil {
 			return
 		}
-		if a.gateway(ctx, "POST", "/accounts/"+account+"/disconnect", nil, nil) == nil {
-			a.pool.Exec(ctx, `UPDATE gateway_actions SET status='done' WHERE id=$1`, id)
+		var locked string
+		if e = tx.QueryRow(ctx, `SELECT id FROM accounts WHERE id=$1 FOR UPDATE`, account).Scan(&locked); e == nil {
+			e = a.finishDisconnects(ctx, tx, account)
+		}
+		if e == nil {
+			tx.Commit(ctx)
+		} else {
+			tx.Rollback(ctx)
 		}
 	}
+}
+
+func (a *App) finishDisconnects(ctx context.Context, tx pgx.Tx, account string) error {
+	var pending bool
+	if e := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM gateway_actions WHERE account_id=$1 AND status='pending')`, account).Scan(&pending); e != nil || !pending {
+		return e
+	}
+	if e := a.gateway(ctx, "POST", "/accounts/"+account+"/disconnect", nil, nil); e != nil {
+		return e
+	}
+	_, e := tx.Exec(ctx, `UPDATE gateway_actions SET status='done' WHERE account_id=$1 AND status='pending'`, account)
+	return e
 }
