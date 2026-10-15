@@ -30,8 +30,8 @@ type App struct {
 	alertMu sync.Mutex
 	alerts  []alert
 	scope   string
-	sendMu  sync.Mutex
-	sending map[string]bool
+	workMu  sync.Mutex
+	running map[string]bool
 	runtime *pgx.Conn
 }
 
@@ -68,7 +68,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		p.Close()
 		return nil, e
 	}
-	return &App{pool: p, cfg: cfg, schema: v, client: &http.Client{Timeout: 12 * time.Second}, scope: scope, sending: map[string]bool{}}, nil
+	return &App{pool: p, cfg: cfg, schema: v, client: &http.Client{Timeout: 12 * time.Second}, scope: scope, running: map[string]bool{}}, nil
 }
 func (a *App) Close() {
 	if a.cancel != nil {
@@ -178,12 +178,15 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/groups/{id}", a.wrap(a.groupGet, false))
 	m.HandleFunc("PATCH /api/groups/{id}", a.wrap(a.patchGroup, false))
 	m.HandleFunc("POST /api/groups/{id}/leave-all", a.wrap(a.leaveAll, false))
+	m.HandleFunc("POST /api/groups/{id}/{action}", a.wrap(a.groupMemberJob, false))
+	m.HandleFunc("GET /api/groups/{id}/jobs", a.wrap(a.groupJobs, false))
 	m.HandleFunc("GET /api/jobs/{id}", a.wrap(a.jobGet, false))
 	m.HandleFunc("POST /api/groups/import", a.wrap(a.importGroup, false))
 	m.HandleFunc("GET /ws", a.ws)
 	m.HandleFunc("POST /api/groups/{id}/send", a.wrap(a.send, false))
 	m.HandleFunc("GET /api/groups/{id}/messages", a.wrap(a.messages, false))
 	m.HandleFunc("POST /api/sequences", a.wrap(a.createSequence, false))
+	m.HandleFunc("PUT /api/sequences/{id}", a.wrap(a.createSequence, false))
 	m.HandleFunc("GET /api/sequences", a.wrap(a.sequences, false))
 	m.HandleFunc("POST /api/groups/{id}/sequence-runs", a.wrap(a.startSequence, false))
 	m.HandleFunc("POST /api/groups/{id}/sequence-runs/preview", a.wrap(a.previewSequence, false))

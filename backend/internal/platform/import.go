@@ -34,6 +34,7 @@ func (a *App) importGroup(w http.ResponseWriter, r *http.Request) error {
 	defer tx.Rollback(ctx)
 	selectedMembers := map[string]string{}
 	var creator *string
+	var admin *string
 	seen := map[string]bool{}
 	for _, id := range b.AccountIDs {
 		if seen[id] || id == "" {
@@ -57,10 +58,17 @@ func (a *App) importGroup(w http.ResponseWriter, r *http.Request) error {
 			c := id
 			creator = &c
 		}
+		if role == "admin" && admin == nil {
+			value := id
+			admin = &value
+		}
 		selectedMembers[*platform] = id
 	}
 	groupID := ID()
-	_, e = tx.Exec(ctx, `INSERT INTO groups(id,gateway_group_id,creator_account_id) VALUES($1,$2,$3)`, groupID, b.GatewayGroupID, creator)
+	if admin == nil {
+		admin = creator
+	}
+	_, e = tx.Exec(ctx, `INSERT INTO groups(id,gateway_group_id,creator_account_id,admin_account_id) VALUES($1,$2,$3,$4)`, groupID, b.GatewayGroupID, creator, admin)
 	if e != nil {
 		return e
 	}

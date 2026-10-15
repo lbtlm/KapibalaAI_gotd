@@ -7,9 +7,48 @@ import (
 	"github.com/lbtlm/KapibalaAI_gotd/backend/internal/platform"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
+
+// Rewind all later migrations, not only a historical data patch under test.
+func rewindBusinessSchema(t *testing.T, cfg platform.Config, target int) {
+	t.Helper()
+	p, e := pgxpool.New(context.Background(), cfg.DatabaseURL)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer p.Close()
+	var current int
+	if e = p.QueryRow(context.Background(), `SELECT version FROM schema_migrations`).Scan(&current); e != nil {
+		t.Fatal(e)
+	}
+	files, e := filepath.Glob(filepath.Join("..", "migration", "sql", "*.down.sql"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(files)))
+	for _, file := range files {
+		version, _ := strconv.Atoi(strings.Split(filepath.Base(file), "_")[0])
+		if version > target && version <= current {
+			data, e := os.ReadFile(file)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if _, e = p.Exec(context.Background(), string(data)); e != nil {
+				t.Fatal(e)
+			}
+		}
+	}
+	if _, e = p.Exec(context.Background(), `UPDATE schema_migrations SET version=$1,dirty=false`, target); e != nil {
+		t.Fatal(e)
+	}
+}
 
 // These are explicit business-row inputs in an isolated real PostgreSQL schema.
 // They provide no Session, gateway response, Telegram identity or platform effect.
@@ -40,6 +79,7 @@ func insertBusinessGroup(t *testing.T, cfg platform.Config) string {
 		role := []string{"creator", "admin", "member"}[i]
 		businessSQL(t, cfg, `INSERT INTO members(group_id,platform_user_id,account_id,role) SELECT 'database-group',platform_user_id,id,$2 FROM accounts WHERE id=$1`, id, role)
 	}
+	businessSQL(t, cfg, `UPDATE groups SET admin_account_id='account-2' WHERE id='database-group'`)
 	return "database-group"
 }
 func insertAgentInput(t *testing.T, cfg platform.Config) string {

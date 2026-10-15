@@ -190,7 +190,7 @@ func TestTerminalDiagnosisMigrationRepairsOnlyOverwrittenFailures(t *testing.T) 
 	a, _, cfg := fixtureConfig(t)
 	a.Close()
 	// Version 8 changes data only; these rows are explicit version-7 inputs.
-	businessSQL(t, cfg, `UPDATE schema_migrations SET version=7,dirty=false`)
+	rewindBusinessSchema(t, cfg, 7)
 	cases := []struct{ id, status, result, previous, expected string }{
 		{"expired-illegal", "session_expired", "failed", "ILLEGAL_TRANSITION", "SESSION_EXPIRED"},
 		{"expired-offline", "session_expired", "failed", "ACCOUNT_OFFLINE", "SESSION_EXPIRED"},

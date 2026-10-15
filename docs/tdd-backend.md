@@ -231,3 +231,7 @@ The empty service used the previously frozen Gateway binary SHA256 `889E41C1442B
 ## R22 controller: connection budgets and transport errors
 
 Red: connect inherited12s despite Gateway30s readiness, and a closed connection was incorrectly labeled NETWORK_TIMEOUT. Green: only Gateway POST accounts/:id/connect uses a copied40s HTTP client; other calls and the shared client retain12s. Deadline/net timeout maps504 NETWORK_TIMEOUT; other transport failures503 GATEWAY_UNAVAILABLE. Two targeted tests pass normal/race; vet/build pass. No synthetic Gateway response or real account retry. The outer deadline repair does not prove external MTProto readiness.
+
+## R23 controller: workspace semantics and independent workers
+
+See workspace-refinement-20261015.md R23 for red/green evidence. Reused jobs, audit/effect receipts, sequence snapshots and advisory leases. Account-specific connection ownership unchanged. Actual PostgreSQL reds: chosen administrator ignored, end-marketing left triggers enabled, preview omitted bound actors, slow group task blocked another group. Normal16top and race19top/sub passes; migration reconstruction covered. No Gateway substitutes, Sessions or real Telegram operations. Provider-only fixtures retain their existing boundary. Limits reserve sending capacity while Agents await receipts; app shutdown cancels and joins all workers.

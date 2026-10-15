@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"github.com/gotd/td/tg"
+	"github.com/gotd/td/tgerr"
 	"github.com/lbtlm/KapibalaAI_gotd/gateway/internal/ops"
 	"net/http"
 	"sort"
@@ -49,7 +50,7 @@ func (a *TelegramAdapter) Execute(ctx context.Context, op, gid string, in input,
 		}
 		sort.Strings(ids)
 		for _, id := range ids {
-			if acct := s.state.Accounts[id]; acct != nil && acct.Status == "online" {
+			if acct := s.state.Accounts[id]; acct != nil && acct.Status == "online" && g.Members[acct.PlatformID] {
 				if _, e := a.online(id); e == nil {
 					aid = id
 					break
@@ -108,6 +109,23 @@ func (a *TelegramAdapter) Execute(ctx context.Context, op, gid string, in input,
 		return nil, &APIError{403, "SENDER_NOT_IN_GROUP", 0}
 	}
 	switch op {
+	case "configure":
+		if g.Owner != aid {
+			return nil, &APIError{403, "NO_PERMISSION", 0}
+		}
+		if in.Title != "" {
+			upd, e := live.api.ChannelsEditTitle(ctx, &tg.ChannelsEditTitleRequest{Channel: channel, Title: in.Title})
+			if e != nil && !tgerr.Is(e, "CHAT_NOT_MODIFIED") {
+				return nil, platformError(e)
+			}
+			if e == nil {
+				a.handleUpdates(aid, upd)
+			}
+		}
+		if _, e := live.api.ChannelsUpdateUsername(ctx, &tg.ChannelsUpdateUsernameRequest{Channel: channel, Username: in.Username}); e != nil && !tgerr.Is(e, "USERNAME_NOT_MODIFIED") {
+			return nil, platformError(e)
+		}
+		return map[string]any{}, nil
 	case "invite":
 		link, err := ops.ExportChatInvite(ctx, live.api, &tg.MessagesExportChatInviteRequest{Peer: peer})
 		if err != nil {

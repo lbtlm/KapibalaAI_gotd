@@ -39,6 +39,7 @@ type input struct {
 	Text             string   `json:"text"`
 	IdempotencyKey   string   `json:"idempotencyKey"`
 	Username         string   `json:"username"`
+	Title            string   `json:"title"`
 	AccountIDs       []string `json:"accountIds"`
 }
 

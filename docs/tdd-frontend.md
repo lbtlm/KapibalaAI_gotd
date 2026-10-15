@@ -231,3 +231,7 @@ I21主控确认对象修正：删除确认仅随机内部ID不易核对，现复
 ## R22 controller: per-account action state
 
 Red: pure rendered account columns could not disable only the pending account. Green: per-account mutation keys/pending IDs and synchronous double-click admission; errors stay with their account. Group moves affect selected accounts only, deletion affects its target. Removed obsolete global action busy/error state. Account columns plus deletion/auth tests23pass; typecheck/build pass. Browser check/connect budget60s covers backend connect40s plus profile12s; unrelated calls remain15s. No simulated account/Gateway response. Real concurrent account checking remains manual acceptance.
+
+## R23 controller: visual scripts and group workspace
+
+Replaced old sequence-page execution UI with reusable script library editor and per-group execution panel. JSON and visual forms share one definition; resolved preview shows actual accounts, roles and text. Five editor tests cover incomplete-name editing and invalid role/index/delay/text. Frontend46tests passed; typecheck/build passed. Pure editor/account props and preexisting auth/provider tests only; no simulated Gateway/account responses. Actual populated-group browser acceptance and real Telegram effects remain manual/pending.

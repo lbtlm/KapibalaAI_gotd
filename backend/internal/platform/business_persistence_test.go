@@ -3,8 +3,6 @@ package platform_test
 import (
 	"context"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -67,13 +65,7 @@ func TestHistoricalVerificationNormalizationPreservesRealProfilesAndHistory(t *t
 		t.Fatal(e)
 	}
 	defer pool.Close()
-	down, e := os.ReadFile(filepath.Join("..", "migration", "sql", "007_real_accounts.down.sql"))
-	if e != nil {
-		t.Fatal(e)
-	}
-	if _, e = pool.Exec(context.Background(), string(down)+`;UPDATE schema_migrations SET version=6,dirty=false`); e != nil {
-		t.Fatal(e)
-	}
+	rewindBusinessSchema(t, cfg, 6)
 	businessSQL(t, cfg, `INSERT INTO accounts(id,status,connection_id,rate_limited_until,phone,phone_verified,verification_source,first_name,last_checked_at,last_check_result) VALUES('history-real','online','real-incarnation',NULL,'preserved real phone',true,'telegram','Real profile',now(),'success'),('history-unverified','rate_limited','historical-incarnation',now()+interval '1 hour','preserved input phone',true,'simulated','Input profile',now(),'success')`)
 	businessSQL(t, cfg, `INSERT INTO account_logs(account_id,actor,action,result) VALUES('history-real','database input','historical_input','success'),('history-unverified','database input','historical_input','success')`)
 	businessSQL(t, cfg, `INSERT INTO account_group_snapshots(account_id,items) VALUES('history-real','[{"id":"database-group-input","title":"Historical row","username":null,"type":"group","role":"unknown"}]'),('history-unverified','[{"id":"database-group-input","title":"Historical row","username":null,"type":"group","role":"unknown"}]')`)
@@ -123,21 +115,13 @@ func TestHistoricalCacheDowngradePreservesRetiredVerification(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer pool.Close()
-	down, e := os.ReadFile(filepath.Join("..", "migration", "sql", "007_real_accounts.down.sql"))
-	if e != nil {
-		t.Fatal(e)
-	}
-	if _, e = pool.Exec(context.Background(), string(down)+`;UPDATE schema_migrations SET version=6,dirty=false`); e != nil {
-		t.Fatal(e)
-	}
+	rewindBusinessSchema(t, cfg, 6)
 	businessSQL(t, cfg, `INSERT INTO accounts(id,status,phone_verified,verification_source,last_checked_at,last_check_result) VALUES('historical-cache','idle',true,'simulated',now(),'success')`)
 	businessSQL(t, cfg, `INSERT INTO account_group_snapshots(account_id,items) VALUES('historical-cache','[{"id":"historical-group","title":"Historical input","username":null,"type":"group","role":"unknown"}]')`)
 	if e = migration.Apply(cfg.DatabaseURL); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = pool.Exec(context.Background(), string(down)+`;UPDATE schema_migrations SET version=6,dirty=false`); e != nil {
-		t.Fatalf("downgrade rejected retained unverified cache: %v", e)
-	}
+	rewindBusinessSchema(t, cfg, 6)
 	var preserved bool
 	if e = pool.QueryRow(context.Background(), `SELECT jsonb_array_length(s.items)=1 AND s.last_synced_at IS NULL AND a.verification_source IS NULL AND NOT a.phone_verified AND a.last_check_result IS NULL AND a.last_checked_at IS NULL FROM account_group_snapshots s JOIN accounts a ON a.id=s.account_id WHERE a.id='historical-cache'`).Scan(&preserved); e != nil || !preserved {
 		t.Fatal("downgrade changed retained cache or manufactured verification", e, preserved)

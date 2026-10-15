@@ -290,3 +290,7 @@ Green: six directly affected top-level tests plus eleven subcases passed normall
 ## R22 controller: independent account startup
 
 Actual PostgreSQL ACCESS EXCLUSIVE lock on gateway_sessions reproduced the old mutex blocking another account (red 0.53s). Connect now reserves its existing account slot under the map lock, releases it before storage/network, and marks ready under the lock. Same-account attempts retain the existing CID/ownership fence. Disconnect/Close cancel the pending storage context; no second manager or client cache was added. Targeted normal tests passed; targeted race passed in7.273s, vet/build passed. No actual credentials or Telegram RPC used. Prior callback/result ordering and deletion guards retained. Evidence: ignored root-r22/connect-red.log, connect-green.jsonl, gateway-race.jsonl.
+
+## R23 controller: group configuration and leave observer
+
+Group creation retains the existing unique temporary title/creation key for crash recovery. A following idempotent configuration phase applies requested title/address; known Telegram username conflicts retain their concrete422codes, allowing explicit private-link fallback. Pure typed tgerr mapping test passes; vet/build pass. Member-read account selection now excludes accounts that already left, allowing B2 to continue through remaining members. No real create/rename/address/promotion/leave was invoked; no fake RPC/client was added.

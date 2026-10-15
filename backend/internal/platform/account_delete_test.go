@@ -2,8 +2,6 @@ package platform_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -132,13 +130,7 @@ func TestDeletionAuditMigrationRoundTripRetainsOrphanHistory(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer pool.Close()
-	down, e := os.ReadFile(filepath.Join("..", "migration", "sql", "009_account_delete.down.sql"))
-	if e != nil {
-		t.Fatal(e)
-	}
-	if _, e = pool.Exec(context.Background(), string(down)+`;UPDATE schema_migrations SET version=8,dirty=false`); e != nil {
-		t.Fatal("downgrade rejected retained deletion history", e)
-	}
+	rewindBusinessSchema(t, cfg, 8)
 	if e = migration.Apply(cfg.DatabaseURL); e != nil {
 		t.Fatal(e)
 	}
