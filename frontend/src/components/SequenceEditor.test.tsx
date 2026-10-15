@@ -47,11 +47,11 @@ test('AI failure keeps the editable script and reports the cause',async()=>{
 
 test('visual edits preserve JSON roles and allow replacing a cleared name',()=>{
  const save=vi.fn();render(<SequenceEditor pending={false} onSave={save}/>)
- const name=screen.getByLabelText('剧本名称'),saveButton=screen.getByRole('button',{name:'保存剧本'})
+ const name=screen.getByLabelText('剧本名称'),saveButton=screen.getByText('保存剧本').closest('button')!
  fireEvent.change(name,{target:{value:''}})
  expect(saveButton).toBeDisabled()
  fireEvent.change(name,{target:{value:'Test script'}})
- fireEvent.click(screen.getByRole('button',{name:'添加步骤'}))
+ fireEvent.click(screen.getByText('添加步骤').closest('button')!)
  fireEvent.click(saveButton)
  expect(save.mock.calls[0][0]).toMatchObject({name:'Test script',steps:[{index:1,accountRole:'admin'},{index:2,accountRole:'member'}]})
 })
