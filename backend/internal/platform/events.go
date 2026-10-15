@@ -168,7 +168,8 @@ func (a *App) processEvent(ctx context.Context, id int64) error {
 			}
 		}
 	case "message_failed":
-		var groupID, account string
+		var groupID string
+		var account *string
 		e = tx.QueryRow(ctx, `SELECT group_id,account_id FROM messages WHERE client_msg_id=$1 FOR UPDATE`, str("clientMsgId")).Scan(&groupID, &account)
 		if e == pgx.ErrNoRows {
 			e = nil
@@ -180,10 +181,12 @@ func (a *App) processEvent(ctx context.Context, id int64) error {
 		code := str("code")
 		if code == "GROUP_WRITE_FORBIDDEN" {
 			e = unreachable(ctx, tx, groupID)
-		} else if code == "ACCOUNT_SUSPENDED" {
+		} else if code == "ACCOUNT_SUSPENDED" && account != nil {
 			var from string
-			if e = tx.QueryRow(ctx, `SELECT status FROM accounts WHERE id=$1 FOR UPDATE`, account).Scan(&from); e == nil && accountTerminalError(from) == nil {
-				e = transition(ctx, tx, account, from, "suspended", nil)
+			if e = tx.QueryRow(ctx, `SELECT status FROM accounts WHERE id=$1 FOR UPDATE`, *account).Scan(&from); e == pgx.ErrNoRows {
+				e = nil
+			} else if e == nil && accountTerminalError(from) == nil {
+				e = transition(ctx, tx, *account, from, "suspended", nil)
 			}
 		}
 		if e != nil {

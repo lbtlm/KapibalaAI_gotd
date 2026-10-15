@@ -176,22 +176,69 @@ func (a *App) jobGet(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 func (a *App) leaveAll(w http.ResponseWriter, r *http.Request) error {
-	g, e := a.readGroup(r.Context(), r.PathValue("id"))
+	ctx, groupID := r.Context(), r.PathValue("id")
+	tx, e := a.pool.Begin(ctx)
 	if e != nil {
 		return e
 	}
-	ids := []string{}
-	for _, m := range g.Members {
-		if m.AccountID != nil && *m.AccountID != g.CreatorAccountID {
-			ids = append(ids, *m.AccountID)
-		}
+	defer tx.Rollback(ctx)
+	// Share deletion's account lock before reading the final job references.
+	// A stable account order avoids inversions between concurrent admissions.
+	rows, e := tx.Query(ctx, `SELECT id FROM accounts WHERE id IN (SELECT creator_account_id FROM groups WHERE id=$1 UNION SELECT account_id FROM members WHERE group_id=$1) ORDER BY id FOR UPDATE`, groupID)
+	if e != nil {
+		return e
 	}
-	if g.CreatorAccountID != "" {
-		ids = append(ids, g.CreatorAccountID)
+	locked := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if e = rows.Scan(&id); e != nil {
+			rows.Close()
+			return e
+		}
+		locked[id] = true
+	}
+	rows.Close()
+	if e = rows.Err(); e != nil {
+		return e
+	}
+	var creator string
+	if e = tx.QueryRow(ctx, `SELECT COALESCE(creator_account_id,'') FROM groups WHERE id=$1`, groupID).Scan(&creator); e == pgx.ErrNoRows {
+		return fail(404, "GROUP_NOT_FOUND")
+	} else if e != nil {
+		return e
+	}
+	rows, e = tx.Query(ctx, `SELECT DISTINCT account_id FROM members WHERE group_id=$1 AND account_id IS NOT NULL AND account_id!=$2 ORDER BY account_id`, groupID, creator)
+	if e != nil {
+		return e
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if e = rows.Scan(&id); e != nil {
+			return e
+		}
+		if !locked[id] {
+			return fail(409, "CAS_CONFLICT")
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if e = rows.Err(); e != nil {
+		return e
+	}
+	if creator != "" {
+		if !locked[creator] {
+			return fail(409, "CAS_CONFLICT")
+		}
+		ids = append(ids, creator)
 	}
 	job := ID()
-	_, e = a.pool.Exec(r.Context(), `INSERT INTO jobs(id,kind,group_id,state) VALUES($1,'leave',$2,$3)`, job, g.ID, jobState{Creator: g.CreatorAccountID, Members: ids, Phase: "leave"})
+	_, e = tx.Exec(ctx, `INSERT INTO jobs(id,kind,group_id,state) VALUES($1,'leave',$2,$3)`, job, groupID, jobState{Creator: creator, Members: ids, Phase: "leave"})
 	if e != nil {
+		return e
+	}
+	if e = tx.Commit(ctx); e != nil {
 		return e
 	}
 	respond(w, 202, map[string]any{"jobId": job})

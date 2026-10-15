@@ -247,10 +247,9 @@ func (a *App) importAccountPair(r *http.Request, pair *importFiles, group string
 		return "", e
 	}
 	sessionHash := digestBytes(pair.session)
-	reg.AccountID = "acct_" + sessionHash[:32]
+	reg.AccountID = "acct_" + ID()
 	configBytes, _ := json.Marshal(reg)
 	configHash := digestBytes(configBytes)
-	reg.Session = base64.StdEncoding.EncodeToString(pair.session)
 	id := reg.AccountID
 	ctx := r.Context()
 	// Persist only fingerprints and stable identity before the external registration.
@@ -282,12 +281,18 @@ func (a *App) importAccountPair(r *http.Request, pair *importFiles, group string
 	defer tx.Rollback(ctx)
 	var existing string
 	var completed bool
-	if e = tx.QueryRow(ctx, `SELECT config_fingerprint,completed FROM account_imports WHERE session_fingerprint=$1 FOR UPDATE`, sessionHash).Scan(&existing, &completed); e != nil {
+	if e = tx.QueryRow(ctx, `SELECT account_id,config_fingerprint,completed FROM account_imports WHERE session_fingerprint=$1 FOR UPDATE`, sessionHash).Scan(&id, &existing, &completed); e == pgx.ErrNoRows {
+		return "", fail(409, "ACCOUNT_IMPORT_CONFLICT")
+	} else if e != nil {
 		return "", e
 	}
+	reg.AccountID = id
+	configBytes, _ = json.Marshal(reg)
+	configHash = digestBytes(configBytes)
 	if existing != configHash {
 		return id, fail(409, "ACCOUNT_IMPORT_CONFLICT")
 	}
+	reg.Session = base64.StdEncoding.EncodeToString(pair.session)
 	if completed {
 		var evidence struct {
 			AccountID string  `json:"accountId"`

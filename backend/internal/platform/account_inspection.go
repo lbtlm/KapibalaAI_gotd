@@ -15,6 +15,15 @@ func accountGatewayError(e error) error {
 		out := &apiError{status: x.Status, code: safeAccountCode(e), message: safeAccountCode(e)}
 		if x.Code == "RATE_LIMITED" {
 			out.extra = map[string]any{"retryAfterSeconds": x.RetryAfterSeconds}
+		} else if x.Code == "ACCOUNT_IN_USE" {
+			var body struct {
+				Reason string `json:"reason"`
+			}
+			json.Unmarshal([]byte(x.Body), &body)
+			switch body.Reason {
+			case "active_connection", "managed_group", "pending_message", "active_job", "active_effect":
+				out.extra = map[string]any{"reason": body.Reason}
+			}
 		}
 		return out
 	}

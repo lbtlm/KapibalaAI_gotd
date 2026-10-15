@@ -161,6 +161,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/accounts", a.wrap(a.accounts, false))
 	m.HandleFunc("POST /api/accounts/import", a.wrap(a.importAccounts, false))
 	m.HandleFunc("GET /api/accounts/{id}", a.wrap(a.accountGet, false))
+	m.HandleFunc("DELETE /api/accounts/{id}", a.wrap(a.deleteAccount, false))
 	m.HandleFunc("GET /api/accounts/{id}/logs", a.wrap(a.accountLogs, false))
 	m.HandleFunc("POST /api/accounts/{id}/check", a.wrap(a.checkAccount, false))
 	m.HandleFunc("GET /api/accounts/{id}/joined-groups", a.wrap(a.joinedGroups, false))
