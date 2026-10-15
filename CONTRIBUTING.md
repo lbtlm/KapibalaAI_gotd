@@ -34,7 +34,9 @@ git switch -c feat/your-topic
 
 ## Test-driven development
 
-按公共契约逐片实现：先运行会失败的行为测试，再复用或实现代码使其通过，最后整理重复。集成测试使用真实 PostgreSQL；E2E 使用真实前端、后端、模拟网关与脚本 Agent。真实 Telegram 与 LLM 验收单独记录，缺少凭据不能记作通过。
+按公共契约逐片实现：先运行会失败的行为测试，再复用或实现代码使其通过，最后整理重复。集成测试使用真实 PostgreSQL；无凭据 E2E 使用真实前端、后端、空账号 Telegram 网关与 scripted provider，不模拟账号或网关成功结果。C3 通过显式 opt-in 读取已有群与 Agent 历史。真实 Telegram 与 LLM 验收单独记录，缺少凭据或数据而 skip 不能记作通过。当前差距见 [要求审计](docs/requirements-audit.md)，操作和测试入口见 [验收指南](docs/acceptance-guide.md)。
+
+只重跑受影响或证据失效的检查。纯文本文档 PR 使用 docs 档位；含图片的文档变更或代码混合 PR 按现有策略执行 light，不用文档提交规避所需检查。历史模拟网关测试已移除，其旧结果不能计入当前覆盖。
 
 空仓库仅用一个不含业务代码的空提交建立 `main` 和 `dev`，此后遵守以上流程。
 

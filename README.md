@@ -1,122 +1,210 @@
-# Kapibala AI
+<h1 align="center">Kapibala AI</h1>
 
-多账号群组消息平台与 React 控制台。Go 后端维护账号状态、群成员、可靠消息时间线、定时序列和自动回复 Agent；消息网关和模型提供方分别运行在独立进程。规范以 [笔试题](docs/全栈开发工程师笔试题-候选人版.md) 和 [已批准实现契约](docs/implementation-contract.md) 为准。用户覆盖项为 Go + gotd、独立 OpenAI-compatible/DeepSeek provider，仓库保持私有。
+<p align="center">多账号群组运营 · 实时消息 · 剧本与 AI Agent</p>
 
-```text
-React :5173 ── HTTP / WebSocket ── backend :8080 ── PostgreSQL 16
-                                      ├── HTTP / SSE ── gateway :8081 (Telegram)
-                                      └── tool / audit ── provider :8082 (scripted / OpenAI-compatible)
-```
+<p align="center">
+  <a href="backend/README.md"><img src="https://img.shields.io/badge/Go-1.24-00ADD8" alt="Go 1.24"></a>
+  <a href="frontend/package.json"><img src="https://img.shields.io/badge/React-18-149ECA" alt="React 18"></a>
+  <a href="compose.yaml"><img src="https://img.shields.io/badge/PostgreSQL-16-4169E1" alt="PostgreSQL 16"></a>
+</p>
 
-演示账号为 `admin/admin`、`viewer/viewer`，仅适合本地受控演示。admin 可写，viewer 只读，后端执行权限检查。默认原生监听地址为 `127.0.0.1`，Compose 仅公开本机控制台端口。此项目尚无生产部署目标或生产身份管理配置。
+Kapibala AI 是一个管理 Telegram 服务账号、群组和消息的操作台。操作员可以导入账号、建立或接管群组、按剧本分配成员发言，并由绑定管理员的 AI Agent 处理外部成员消息。账号、消息、任务和 Agent 步骤均保留可追溯记录。
 
-## 快速启动：空账号与真实 Telegram 网关
+项目依据 [全栈开发工程师笔试题](docs/全栈开发工程师笔试题-候选人版.md) 实现，按用户确认采用 **Go / gotd、真实 Telegram 网关和独立 DeepSeek provider**。原题、用户调整与当前差距分别记录，当前版本尚未完成全部异常场景验收。
 
-需要 Go 1.24、Node.js 22.14.0、pnpm 10.18.1 和 PostgreSQL 16。为 backend 和 gateway 分别准备专用数据库。脚本编译、显式迁移、启动三个 Go 进程并等待健康检查；Vite 在另一个终端运行。新数据库的账号列表为空，登录后上传同名 Session + JSON，再主动连接、检测和同步所在群。启动空系统不会连接 Telegram。
+[快速开始](#quick-start) · [功能](#capabilities) · [操作流程](#workflow) · [架构](#architecture) · [需求覆盖](#requirements) · [验证与限制](#verification) · [常见问题](#faq) · [文档](#documentation) · [参与开发](#contributing)
 
-Windows PowerShell，仓库根目录：
+![群工作区：实时聊天、外部成员标识、快捷回复与管理员控制](docs/images/group-chat.png)
+
+*本地实际页面，展示已授权的测试账号和群消息。截图时群处于暂停状态；截图不代表重新执行发送或恢复营销。点击图片可查看原图。*
+
+<a id="quick-start"></a>
+
+## 快速开始
+
+需要 **Docker Engine / Docker Desktop 与 Compose v2**。请先检出待评审分支或已验收提交；当前开发交付在 [PR #5](https://github.com/lbtlm/KapibalaAI_gotd/pull/5)，`main` 不代表最新开发进度。
+
+在仓库根目录执行，已有 `.env` 会保留：
 
 ```powershell
 Set-Location D:\web_projects\kapibala_ai
-# 按你的 PostgreSQL 安装修改连接地址和用户；只需创建一次。
-createdb -h 127.0.0.1 -p 55432 -U kapibala kapibala_e2e
-createdb -h 127.0.0.1 -p 55432 -U kapibala kapibala_gateway_e2e
-$env:E2E_DATABASE_URL='postgres://kapibala@127.0.0.1:55432/kapibala_e2e?sslmode=disable'
-$env:E2E_GATEWAY_DATABASE_URL='postgres://kapibala@127.0.0.1:55432/kapibala_gateway_e2e?sslmode=disable'
-node scripts/local-stack.mjs
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+# 编辑 .env：将 POSTGRES_PASSWORD 替换为本地随机密码（字母、数字、-、_）。
+docker compose -p kapibala-demo build
+docker compose -p kapibala-demo up -d --no-build
+Invoke-RestMethod http://127.0.0.1:5173/api/health
 ```
 
-Linux/macOS，仓库根目录：
+打开 [本地控制台](http://127.0.0.1:5173)，使用 `admin / admin` 操作，或使用 `viewer / viewer` 查看。两组账号仅供本地受控演示，后端仍会拒绝 viewer 的业务写入。
 
-```bash
-createdb -h 127.0.0.1 -p 5432 -U kapibala kapibala_e2e
-createdb -h 127.0.0.1 -p 5432 -U kapibala kapibala_gateway_e2e
-E2E_DATABASE_URL='postgres://kapibala:your-password@127.0.0.1:5432/kapibala_e2e?sslmode=disable' \
-E2E_GATEWAY_DATABASE_URL='postgres://kapibala:your-password@127.0.0.1:5432/kapibala_gateway_e2e?sslmode=disable' node scripts/local-stack.mjs
+**首次启动没有 Telegram 账号。** 上传同名 `.session` + `.json` 后，再主动连接并检测；上传本身不登录 Telegram。Compose 只对本机公开控制台端口，数据库和内部服务不直接对外开放。
+
+<details>
+<summary>启用真实 AI、查看日志与停止服务</summary>
+
+默认 `AGENT_MODE=scripted` 是固定协议回复，用于无密钥启动，不代表真实 AI。需要模型生成剧本或回复时，在忽略的 `.env` 中配置：
+
+```dotenv
+AGENT_MODE=openai
+OPENAI_API_STYLE=chat_completions
+OPENAI_BASE_URL=https://api.deepseek.com
+OPENAI_MODEL=deepseek-flash
+OPENAI_API_KEY=替换为自己的密钥
 ```
 
-第二个终端：
+修改后执行 `docker compose -p kapibala-demo up -d --no-deps agent`。真实模型配置只进入独立 provider；群内还需绑定在线管理员、启用 Agent，并处于未暂停状态。AI 回复预演只生成预览，不发送群消息。
 
 ```powershell
-Set-Location D:\web_projects\kapibala_ai\frontend
-pnpm install --frozen-lockfile
-pnpm dev
-```
-
-打开 <http://127.0.0.1:5173>。停止服务用其终端的 Ctrl+C；它仅停止自身启动的进程，不删除数据库。停止 Vite 用其独立终端的 Ctrl+C。端口占用会拒绝启动。可设置 `BACKEND_PORT`、`GATEWAY_PORT`、`AGENT_PORT`；更换后端端口时让 Vite 的 `VITE_BACKEND_URL` 指向对应地址，例如 `http://127.0.0.1:18080`。`.env.example` 供 Compose 使用；原生脚本不会自动加载 `.env`。
-
-## Docker Compose 演示
-
-需要 Docker Engine 和 Compose v2。复制 `.env.example` 为忽略的 `.env`，填入仅含字母、数字、`-`、`_` 的本地随机 PostgreSQL 密码。修改 `CONSOLE_PORT` 可以避开已有 Vite。
-
-```powershell
-Copy-Item .env.example .env
-# 编辑 .env 后执行
-docker compose -p kapibala-demo up --build -d
 docker compose -p kapibala-demo logs --tail 100 backend gateway agent
+# 停止本项目，保留数据库与媒体卷。
 docker compose -p kapibala-demo down
 ```
 
-数据库保存在该专用 Compose 项目的 volume，`down` 保留它。迁移先于 backend/provider 执行，`gateway-db` 仅在缺失时创建独立的 `kapibala_telegram_gateway` 数据库。网关只运行 Telegram 实现，账号由上传创建；模型 provider 仍按其独立配置选择 scripted/openai。已有账号的升级先按 [网关说明](gateway/README.md) 完成必要的离线凭据迁移，不能直接把旧模拟库改成真实库。镜像交付和保留数据的回滚见 [运维说明](docs/operations.md)。
+不要给保留数据的停止命令加 `--volumes`。已有数据库继续使用原密码；端口冲突可调整 `.env` 中的 `CONSOLE_PORT`，访问地址随之改变。
 
-## 配置与独立进程
+</details>
 
-| 进程 | 必需配置 | 默认与可选配置 |
-|---|---|---|
-| `backend/cmd/migrate` | `DATABASE_URL` | 显式更新 schema；server 不会隐式迁移 |
-| `backend/cmd/server` | `DATABASE_URL` | `PORT=8080`、`GATEWAY_URL=http://127.0.0.1:8081`、`AGENT_URL=http://127.0.0.1:8082` |
-| `gateway/cmd/gateway` | 独立 `DATABASE_URL` | `PORT=8081`；只支持 Telegram，从持久注册恢复账号 |
-| `backend/cmd/agent` | `DATABASE_URL` | `PORT=8082`、`AGENT_MODE=scripted`；openai 需 `OPENAI_API_KEY` |
-| `frontend` | 无密钥 | Vite 5173，代理 `/api`、`/ws`；`VITE_BACKEND_URL` 可覆盖后端地址 |
+原生 Go / Vite 启动、独立数据库和配置说明见 [启动指南](docs/getting-started.md)。升级、备份与原镜像回滚见 [运维说明](docs/operations.md)。
 
-三个 Go 服务均支持 `BIND_HOST`；本机默认为 `127.0.0.1`，容器显式为 `0.0.0.0`。网关健康检查 `/health`，provider `/health`，backend `/api/health`。网关每数据库只允许一个 writer，因此同时运行测试与演示时必须使用不同数据库。
+<a id="capabilities"></a>
 
-Telegram 账号通过控制台上传同名 Session + JSON，凭据与转换后的 Session 保存到独立网关数据库；正常启动不再读取 manifest。旧 manifest 只供显式离线迁移使用，原 Session 不修改，详见 [gateway/README.md](gateway/README.md)。API ID/hash、账号身份和 Session 禁止写入 Git、日志或 CI。只连接明确授权的账号；真实账号验收与空系统 CI 分开。
+## 功能
 
-真实模型只在 provider 进程配置 `AGENT_MODE=openai`、`OPENAI_API_KEY`、`OPENAI_BASE_URL=https://api.deepseek.com`、`OPENAI_MODEL=deepseek-flash`、`OPENAI_API_STYLE=chat_completions`。Responses provider 使用相应服务的 `/v1` base 和 `OPENAI_API_STYLE=responses`。`AGENT_URL` 把后端连接到这个独立 provider，前端不接触 key 或推理内容。真实模式详细说明见 [backend/README.md](backend/README.md)。
+| 能力 | 操作台中的行为 |
+| --- | --- |
+| 账号管理 | Session + JSON 批量上传；文件名和 JSON 资料预填；检测后校准；账号分组、同步所在群、操作日志、单个与批量删除 |
+| 独立连接生命周期 | 同一账号复用唯一网关客户端；不同账号独立检测；保留具体 Telegram 错误码；忙碌或存在未决任务时拒绝删除 |
+| 群组工作区 | 选择群主、成员和管理员建群；从账号已同步群列表导入已有超级群；成员角色、加入与管理操作 |
+| 实时聊天 | 分页历史、实时追加、自有消息投递状态；外部成员 warning 标识；选择服务账号快捷回复 |
+| 剧本库与批次 | JSON / 可视化编辑、折叠、对话预览、AI 草稿；按管理员或普通成员分配；变量预检；独立发送批次和逐步日志 |
+| 群专属 Agent | 固定管理员身份和持久群上下文；外部消息触发；同群最多一个 run；工具执行、内容审计和运行步骤可查 |
+| 营销生命周期 | 暂停保留群和配置并停止本轮自动任务；恢复后可重新确认剧本；彻底结束按任务流程依次退群 |
+| 媒体与贴纸 | 图片、音视频、文件和 WebP / TGS / WebM 贴纸；认证下载、失败重试、保留期清理及运行中 Agent 文件保护 |
 
-## 验证
+此表说明实现入口，异常覆盖和真实平台实测范围见 [当前要求审计](docs/requirements-audit.md)。
 
-Go 集成必须提供两个专用真实 PostgreSQL DSN，不能使用存放真实账号的数据库。账号/网关测试保留纯逻辑与实际数据库行为，不提供模拟 Telegram 响应。CI 包装拒绝缺 DSN 和意外 skipped tests；明确 opt-in 的真实模型测试单独记录。Go 报告的 `[no test files]` 包只编译，不计为行为测试覆盖。
+<details>
+<summary>查看账号、群组列表和 Agent 步骤截图</summary>
 
-```powershell
-Set-Location D:\web_projects\kapibala_ai
-$env:TEST_DATABASE_URL='postgres://kapibala@127.0.0.1:55432/kapibala_test?sslmode=disable'
-$env:GATEWAY_TEST_DATABASE_URL='postgres://kapibala@127.0.0.1:55432/kapibala_gateway_test?sslmode=disable'
-node --test scripts/*.test.mjs
-node scripts/go-test.mjs backend
-node scripts/go-test.mjs gateway
-node scripts/go-test.mjs backend -race
-node scripts/go-test.mjs gateway -race
-go -C backend vet ./...
-go -C gateway vet ./...
-pnpm --dir frontend test
-pnpm --dir frontend typecheck
-pnpm --dir frontend build
+**账号管理**：状态、最近检测、姓名与手机号集中展示。
+
+![账号管理](docs/images/accounts.png)
+
+**群组列表**：群主、管理员、Agent 状态与快捷操作。
+
+![群组列表](docs/images/groups.png)
+
+**Agent 回复记录**：选择处理批次，查看回复、工具结果、审计与完整详情。
+
+![Agent 回复记录](docs/images/agent-history.png)
+
+</details>
+
+<a id="workflow"></a>
+
+## 操作流程
+
+1. **准备账号**：上传同名文件 → 检查预填资料 → 连接并检测 → 同步所在群。列表及选择器优先显示“姓名 · 手机号”。
+2. **准备群组**：新建群并选择成员，或选择账号及其已同步超级群进行导入。确定管理员，作为该群 Agent 的执行身份。
+3. **准备剧本**：在剧本库编辑消息、角色和每步延迟；进入群内选择剧本和参与成员，填写变量，检查每步最终内容后确认启动。
+4. **观察与互动**：实时聊天查看入站与投递状态；“剧本发送记录”按批次查看进度；“Agent 回复记录”查看每次 run 的工具、审计与结果。
+5. **暂停或结束**：暂停后保留群、成员和配置；恢复只让 Agent 待命，剧本需再次确认启动。彻底结束会执行退群，不能当作暂停使用。
+
+![剧本编辑：角色、逐步延迟、折叠编辑与对话预览](docs/images/script-editor.png)
+
+*编辑步骤与对话预览并排显示；模板变量在群内配置时填入。保存剧本与向群发送是分开的操作。*
+
+剧本消息、Agent 回复和自有账号手动消息均不触发 Agent。一次 run 结束后，群 Agent 继续待命；run 执行期间的新外部消息会进入下一批处理。
+
+<a id="architecture"></a>
+
+## 架构
+
+```mermaid
+flowchart LR
+  UI["React 控制台"] <-->|"REST / WebSocket"| API["Go 业务后端"]
+  API <--> DB[("业务 PostgreSQL")]
+  API -->|"HTTP 操作 / 对账"| GW["Telegram Gateway · gotd"]
+  GW -->|"SSE 事件"| API
+  GW <--> GDB[("独立网关数据库")]
+  GW <--> TG["Telegram"]
+  API <-->|"turn / audit"| Agent["独立 Agent provider"]
+  Agent <--> Model["DeepSeek / OpenAI-compatible"]
+  Agent <--> DB
+  API --> Media["本地媒体卷"]
 ```
 
-Playwright 启动真实空系统（包含 Vite），验证登录、零账号上传引导和 viewer 写权限拒绝；不创建虚构账号或提供模拟 API 响应。请先创建两个专用空数据库：
+| 模块 | 职责 |
+| --- | --- |
+| [`backend/`](backend/README.md) | 账号状态、群任务、出站队列、事件入库、剧本调度、Agent 执行器、鉴权与 WebSocket |
+| [`gateway/`](gateway/README.md) | Session 持久登记、唯一客户端生命周期、Telegram 操作、事件历史、投递对账与媒体读取 |
+| [`backend/internal/provider/`](backend/internal/provider) | 独立模型服务，暴露 `/agent/turn` 和 `/agent/audit`，适配模型协议并保存会话状态 |
+| [`frontend/`](frontend) | React 18 / TypeScript / Vite / Ant Design 控制台 |
+| [`scripts/`](scripts) | 本地启动、CI 策略、验证包装、候选制品校验与受控部署 |
 
-```powershell
-Set-Location D:\web_projects\kapibala_ai
-$env:E2E_DATABASE_URL='postgres://kapibala@127.0.0.1:55432/kapibala_e2e?sslmode=disable'
-$env:E2E_GATEWAY_DATABASE_URL='postgres://kapibala@127.0.0.1:55432/kapibala_gateway_e2e?sslmode=disable'
-$env:BACKEND_PORT='18080'
-$env:GATEWAY_PORT='18081'
-$env:AGENT_PORT='18082'
-$env:E2E_BASE_URL='http://127.0.0.1:15173'
-$env:E2E_API_URL='http://127.0.0.1:18080'
-$env:E2E_STACK_COMMAND='node scripts/local-stack.mjs'
-pnpm --dir frontend exec playwright install chromium
-pnpm --dir frontend test:e2e
-```
+出站先保存意图，再执行外部操作；`accepted` 仅表示受理，`sent` 才表示已发出。未知效果保留 `unknown` 并对账，避免盲目重复。业务数据库与网关数据库分离；同一网关数据库只允许一个 writer。
 
-已有服务会在本地被 Playwright 复用；最终验收应停止旧候选并启动待验收版本。CI 每次使用全新 PostgreSQL 和自身服务。真实 Telegram、真实 LLM 与人工界面验收分别记录，空系统/单元/CI 通过不代表这些外部验收通过。旧模拟故障用例已按用户要求移除，其历史结果不作为当前真实故障覆盖。
+<a id="requirements"></a>
 
-当前未完成/未验证要求与关键异常证据见 [要求审计](docs/requirements-audit.md)，历史验收记录见 [验收矩阵](docs/验收矩阵.md)，协作状态见 [development-status.md](docs/development-status.md)，各组件 TDD/reuse 文档见 `docs/tdd-*.md`、`docs/reuse-*.md`。C1 已实现图片、音视频、文件与 WebP/TGS/WebM 贴纸下载显示；媒体持久化在独立卷，默认保留30天，运行中的群 Agent 会保护文件。单文件上限64MiB，超限明确提示；失败可重试。C3 只读已有群测试和面试 API 对照见 [流程覆盖表](docs/api-flow-coverage.md)。真实 Telegram 的服务器原时间戳为秒，真实平台无法保证规范中的两秒故障收敛，未知外部效果会保持待核实而不盲目重复。
+## 需求覆盖与交付
 
-开发分支全部 PR 到 `dev`，执行 **light**：策略/脚本测试、Go domain 纯单元测试、前端 unit/typecheck，不做前端构建、PG/race、E2E 或镜像构建；明确纯文档 PR 使用 **docs**，仅策略/脚本测试与 Gate。验收后的同仓 `dev` → `main` 发布 PR 执行 **full**，包括 Go/PostgreSQL/race/vet、前端 build、真实空系统 E2E、同批镜像冒烟与 SHA256 原制品。普通 dev/main push 不重复跑 CI；显式手动 full 为可选重验。
+| 要求 | 交付入口 | 当前边界 |
+| --- | --- | --- |
+| A0–A4、A6 | 迁移、账号状态、可靠消息、群任务、时间线、登录及控制台 | 有实现与分层测试；网关 504 / 503、SSE 断流和建群异常仍有未验收项 |
+| A5 / 2.2 | 四工具 Agent 协议、预算、审计、幂等、持久检查点及详情 | 已补关键异常测试；外部效果后的崩溃窗口和部分协议组合仍待验 |
+| B1–B4 | 定时剧本、群生命周期、登录会话、断线补齐 | 正常流程及部分恢复有证据；退群失败顺序、浏览器 3 秒补齐等未闭环 |
+| C1 | 媒体下载、展示、保留期与清理 | 已实现；真实 TGS / MP4 已验，其他格式的平台实测不能由此推断 |
+| C2 | 独立真实 LLM provider | DeepSeek 工具与审计已实测；用户确认替换题目中的 Claude / Gemini |
+| C3 | Playwright 登录 → 已有群 → Agent 步骤 | 已在已有真实数据的系统通过；空系统 CI 显式跳过该用例 |
+| 第 5 节 | 保留 Git 历史、README 启动说明 | 本仓库及本文；没有变更仓库可见性或发布制品 |
 
-固定 required check 仍为 `CI Gate`，只接受所选档位的精确成功/跳过组合，普通文档提交无需 `[skip ci]`。轻量通过不代表 gateway/PG/恢复或完整构建验收通过。发布 PR 的原 artifact 可直接用于受控准备流程，绑定其实际 merge-test SHA、父提交与被测 source tree，无需为准备包再跑一次 full；历史 push 候选仍可回滚。分支流程见 [CONTRIBUTING.md](CONTRIBUTING.md)，档位与制品规则见 [运维说明](docs/operations.md)。尚未宣称生产部署、Release 或标签发布。
+操作预期和证据入口见 [验收指南](docs/acceptance-guide.md)。逐条 A0–C3 差距见 [要求审计](docs/requirements-audit.md)，19 个必需方法 / 路径的页面映射见 [API 流程覆盖表](docs/api-flow-coverage.md)。接口存在不等于所有异常契约通过。
 
-PR #1 已合入 `dev`。合并后的需求查漏、已定位的边界问题及 10 月 15 日白天优先级见 [2026-10-15 白天工作计划](docs/upgrade-plan-2026-10-15.md)；既有 CI 通过不代表新发现的场景已经验证。
+<a id="verification"></a>
+
+## 验证与当前限制
+
+最近业务修复基线为 [`e36d699`](https://github.com/lbtlm/KapibalaAI_gotd/commit/e36d699c96a030009e46dc199532abc9cd2f47f1)。R33 新增 **15 个异常场景**，相关 **19 个场景的 race 检查通过**，实际审计超时场景单独通过，`go vet` 通过。修复了“账号没有待发消息时，限流到期不恢复”的缺陷。红绿过程与命令见 [Backend TDD 记录](docs/tdd-backend.md)。
+
+[该代码提交的轻量 CI](https://github.com/lbtlm/KapibalaAI_gotd/actions/runs/38767836550) 已通过；当前 PR 的最新检查见 [PR #5](https://github.com/lbtlm/KapibalaAI_gotd/pull/5)。轻量 CI 不包含完整 PostgreSQL / race / E2E / 镜像发布验证。本轮文档整理复用未失效的业务证据，不重复运行业务测试。
+
+优先待闭环的内容是：**504 / 503 对账时限与落地唯一性、发送或踢人已生效后的崩溃恢复、SSE 接入层断流、退群失败顺序和浏览器断线补齐时限**。固定管理员不可用时的 `ADMIN_UNAVAILABLE` 与题目 `NO_AVAILABLE_ACCOUNT` 仍有错误码差异。
+
+真实 Telegram 的时间戳为秒，且不提供原题模拟网关的“两秒内结果必然收敛”保证。保守保留未知结果是当前行为，不能写成原题严格时序已全部满足。已移除的模拟网关测试仅保留历史记录，不计入当前通过数。
+
+<a id="faq"></a>
+
+## 常见问题
+
+**上传完成为什么还不是在线？** 上传只保存凭据和预填资料。点击“连接并检测”后，由网关向 Telegram 验证并校准身份；会话错误按实际错误码处理。
+
+**Agent 显示“已完成”，是不是停止工作了？** “已完成”指一次消息处理 run。只要群未暂停或结束、Agent 已启用且管理员可用，后续外部消息仍会触发同一群 Agent 的新 run。
+
+**为什么回复还是固定文案？** 先查看群操作区域的运行模式。默认 scripted 不调用模型；真实 AI 需要 provider 的 openai 配置。预演成功只证明生成链路，不代表群内审计和投递已完成。
+
+**剧本延迟从什么时候计算？** 从上一条实际发出的时间开始。请在批次记录中区分“等待执行”“排队中”和“已发出”；网络等待、账号限流与暂停都会影响执行。
+
+**为什么账号不能删除？** 在线、连接中、被群占用或存在未决任务时会返回具体原因。删除不能绕过账号生命周期和群成员约束。
+
+<a id="documentation"></a>
+
+## 文档导航
+
+| 需要了解 | 文档 |
+| --- | --- |
+| 从零启动、端口、数据库、真实 AI 配置 | [启动指南](docs/getting-started.md) |
+| 按要求查看页面、API 与证据 | [验收指南](docs/acceptance-guide.md) · [API 流程覆盖](docs/api-flow-coverage.md) |
+| 还有什么没完成、没验证 | [当前要求审计](docs/requirements-audit.md) |
+| 原题与经确认的调整 | [笔试原文](docs/全栈开发工程师笔试题-候选人版.md) · [实现契约](docs/implementation-contract.md) · [群工作区补充](docs/workspace-refinement-20261015.md) |
+| 复用来源及适配 | [Backend](docs/reuse-backend.md) · [Gateway](docs/reuse-gateway.md) · [Frontend](docs/reuse-frontend.md) |
+| 红绿测试、历史现场结果 | [Backend TDD](docs/tdd-backend.md) · [Gateway TDD](docs/tdd-gateway.md) · [Frontend TDD](docs/tdd-frontend.md) · [历史验收矩阵](docs/验收矩阵.md) |
+| CI 分层、备份、升级与回滚 | [运维说明](docs/operations.md) · [交付测试记录](docs/tdd-delivery.md) |
+| 当前交付与历史协作记录 | [开发状态](docs/development-status.md) |
+
+<a id="contributing"></a>
+
+## 参与开发
+
+开发变更通过工作分支 PR 合入 `dev`；验收后的 `dev` → `main` 使用独立发布 PR。工作 PR 执行 light，纯文本文档 PR 执行 docs，发布 PR 执行 full；包含图片的文档变更以及混合代码 PR 仍按现有规则执行 light。检查规则见 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [运维说明](docs/operations.md)。
+
+修改前先读实现契约，在受影响路径复用现有能力，按可观察行为做定向验证。真实 Session、API key 和数据库不进入 Git 或 CI 制品；本文图片中的测试手机号、群链接与消息已获用户明确展示授权。合并、公开发布与生产部署遵循各自授权，本次文档收尾不执行这些操作。

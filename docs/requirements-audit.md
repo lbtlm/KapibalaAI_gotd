@@ -2,6 +2,8 @@
 
 范围：主控独立完成，沿用 issue #4 / PR #5。基线 `708633c`，叠加本次 R33 限流恢复修复与测试。规范为 [候选人版](全栈开发工程师笔试题-候选人版.md)，用户覆盖项以 [实现契约](implementation-contract.md) 为准。本文是当前结论；旧验收矩阵内的历史模拟网关记录不能替代当前证据。
 
+R33 已提交为 `e36d699`，[轻量 CI 已通过](https://github.com/lbtlm/KapibalaAI_gotd/actions/runs/38767836550)。后续文档整理见 [验收指南](acceptance-guide.md)；页面截图和文档更新不改变下列未验证结论。
+
 ## 结论与优先级
 
 核心功能均有实现入口，但不能宣称 A/B/C 全部验收完成。本轮确认并修复一个实际缺陷：**没有待发消息时，账号限流到期不自动恢复**。其余新增用例补齐证据，没有为了制造红绿过程而修改正确实现。
@@ -61,7 +63,7 @@
 | C1 媒体下载/清理/运行保护 | R32 media测试及TGS/MP4现场 | 已实现且有分层证据；其他现场格式见P2 |
 | C2 独立真实LLM服务 | `provider`、真实DeepSeek工具/审计与R29现场回复 | 用户替换Claude/Gemini；真实Responses端点未验 |
 | C3 登录→群→Agent步骤 | `frontend/e2e/group-agent.spec.ts`，R32实际1 passed | 复用；空系统CI显式skip，不能算自动获得该业务证据 |
-| 交付 README / Git历史 | README、现有分支PR | 已有；最终提交CI见PR；不发布、不合并、不改仓库可见性 |
+| 交付 README / Git历史 | [README](../README.md)、[启动指南](getting-started.md)、[验收指南](acceptance-guide.md)、现有分支PR | 已整理并配本地页面截图；最终提交CI见PR；不发布、不合并、不改仓库可见性 |
 
 ## 题目差异与用户覆盖项
 
