@@ -39,3 +39,6 @@ B4 复用现有实际栈 Playwright、HTTP 准备和 fake 网关注入；将 C3 
 实际栈测试的 Telethon SQLite 表结构参考本批 Niko 的 gateway/account_management_test.go（同一开发快照），由 Node 22 内置 SQLite 在临时目录生成完全合成文件，授权字节不是实际账号，结束删除；不将 Session 文件加入 Git 或证据包。仅新增覆盖缺失公共行为的 UI/HTTP/浏览器测试，无额外依赖。旧账号操作/表头实现已原位替换，没有保留重复入口。
 
 F16验证收尾：新的Node22 SQLite实际上传用例、合成展示布局用例与既有platform真实栈证据分别标明；测试的AntD虚拟选项、zhCN关闭与相对has locator按实际DOM原位修正，没有保留备用测试路径或改生产交互来迁就测试。审查后只扩既有日志动作映射upgrade_disconnect，没有新模块或依赖。
+
+I18（2026-10-15）：日志结果复用既有 StatusTag / statusPositive / statusDanger，仅补 success 中文映射，替代 AccountDetails 内独立 AntD success/error Tag；无新CSS、主题或依赖。所属群空态原位复用 lastSyncedAt 与现有 React Query 缓存，未新增API、数据推断或“补资料”路径。既有同步失败不替换数据的行为保留，并补明确提示。新增AccountDetails公共UI/HTTP边界用例和极小production-browser颜色/空态回归，浏览器身份字段全部null、群数组为空；没有复制新仓库模块或引入真实账号数据。验证及红绿证据见tdd-frontend.md I18。
+I18浏览器证据生成最终复用Playwright testInfo.outputPath/attach，移除固定ignored输出与前置目录依赖；本地runner只负责选择production preview，不是tracked测试的运行前提。

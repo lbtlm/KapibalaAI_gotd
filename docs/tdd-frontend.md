@@ -138,3 +138,24 @@ AntD NODE_ENV=test 的 useId 固定为 test-id，使多个 Select 与 Modal aria
 既有真实栈 `pnpm exec playwright test e2e/platform.spec.ts --reporter=list --output=../.local/inspection-20261015/iris/platform-results`，3 passed / 18.4s（C3/viewer/B4），platform-stable.log。B4从恢复184.971ms、认证后100.555ms，三条各一行，seq16/17/18，第二重连cursor18保持唯一；没有重跑已通过platform。
 
 本轮服务端口18080/18081/18082，Vite15173，DSN由忽略的test-environment.json提供，未使用5173 demo。截图已逐图看过：.local/inspection-20261015/iris/actual-upload.png、actual-details.png、actual-groups.png、actual-logs.png；都是隔离真实栈加合成数据，不是Telegram真实账号/真实LLM证据。旧fake-stack session72771保留供主控审查修复后的定向健康/限流/升级联调，主控确认后清理；新二进制修复的联调尚不由上述旧服务结果证明。源码和文档完成后冻结，SUBMITTED待主控最终验收。
+
+## I18：日志结果 Tag 与所属群空态（2026-10-15）
+
+Iris · 前端工程师，沿用 Sol High，Fast未暴露。范围仅 AccountDetails、StatusTag、受影响UI测试及本轮TDD/reuse记录；共享仓库不回退他人修改，无分支/提交/push、递归委派或5173账号写请求。先经CodeGraph定位现有调用链，按当前磁盘和账号契约revision4实施。API、缓存更新和连接权限均不变。
+
+根因1：日志单独使用 AntD6 默认 filled Tag 的 success/error 状态色，现有深色 colorSuccess/colorError 经主题派生的背景偏灰；没有全局Tag覆盖或opacity问题。原生产构建成功文字/背景 rgb(45,97,80)/rgb(151,161,156)，对比度2.687；失败4.455，opacity均1。修复复用现有 StatusTag Positive/Danger 的明确浅底/深字，仅增加 success→成功映射；不改主题或CSS、不保留旧结果渲染路径。新构建成功对比度6.400、失败6.266，两者分别绿/红且文字完整。
+
+根因2：所在群空表无条件使用“尚无成功同步的群组快照”，忽略 lastSyncedAt。现按该字段区分“尚未同步所在群”和“最近一次同步未发现已加入的群组”；首次读取失败单独提示重试，加载时不提前显示空态。同步失败继续保留既有数据/时间，并明确“本次同步失败，仍显示上次同步结果”。未加入虚构身份或群资料。
+
+| 验证 | red | green |
+|---|---|---|
+| 成功空结果/失败保留 | `pnpm exec vitest run src/components/AccountDetails.test.tsx`，empty-red.log：成功空结果仍旧文案，断言失败 | 最小空态修复后empty-green.log 1 passed；补未同步/读取失败覆盖，最终与Accounts调用链合跑12 passed。 |
+| 结果Tag可读性 | 原构建+Edge公开UI颜色测量，colors-red.log：成功对比度2.687，未达4.5；log-colors-red.json、log-results-red.png保留实际原值和图 | 复用状态组件后colors-green.log 1 passed/4.1s；log-colors.json实测成功6.400/失败6.266，log-results.png。 |
+
+最终受影响命令 `pnpm exec vitest run src/components/AccountDetails.test.tsx src/pages/Accounts.test.tsx`：2 files / 12 passed，39.89s（affected-unit.log）。原缓存非空/失败保留、权限、显式连接意图等Accounts覆盖全部保留。`pnpm build`通过，3258 modules，6.13s（build.log，含tsc）；原大chunk警告未扩展优化。新增三种视觉用例后仅补`pnpm typecheck`通过（typecheck-final.log），不重复生产build。
+
+基于该新production dist，以临时15173 vite preview运行Edge，所有/api/仅为公共HTTP展示夹具，身份字段null、群items始终[]，不是实际账号/Telegram证据。`pnpm exec playwright test --config ../.local/inspection-20261015/iris-i18/playwright.config.mjs --grep '所在群'`：3 passed/8.9s（empty-visual.log），分别检查未同步/成功空结果/失败保留上次成功空结果，并比较失败前后同步时间不变。截图groups-not-synced.png、groups-synced-empty.png、groups-failed-retained.png及日志结果图已逐图检查，无重叠/过渡帧。临时runner首次ESM扩展名配置错误修正为.mjs后才获得上述真实行为red，不把工具启动失败计作产品red。
+
+证据全部在忽略目录 .local/inspection-20261015/iris-i18/；没有真实姓名、手机号或群名加入Git，未触5173真实账号检查/连接/同步。现有实际栈accounts.spec只更新被替代的空态文案断言，未重复整套上传/C3/B4。主控部署后再做5173只读终验，当前本地结果不冒充已部署或真实链路验收。
+
+I18最终artifact收敛：主控指出tracked浏览器测试不应依赖预先存在的ignored输出目录。已全部改用testInfo.outputPath，颜色JSON通过testInfo.attach进入标准Playwright artifact；tracked测试不依赖本地runner/人工目录。本地仅把结果复制回上述证据目录供查看。仅定向复跑4项反馈用例，feedback-final.log 4 passed / 6.9s；typecheck-artifacts.log通过。没有重复12项unit或生产build；生产代码仍与已通过的新dist一致。全部完成后停止写入，SUBMITTED等待主控部署后只读终验。

@@ -51,7 +51,7 @@ test('账号管理实际栈：配对导入、逐项结果、分组、模拟检�
   let createdGroupId:string|undefined
   await expect.poll(async()=>{const job=await checked<{status:string;groupId?:string}>(await request.get(backend+'/api/jobs/'+jobId,{headers}));createdGroupId=job.groupId;return job.status},{timeout:20000}).toBe('finished')
   const managedBefore=await checked<{id:string;agentEnabled:boolean}[]>(await request.get(backend+'/api/groups',{headers}))
-  await modal.getByRole('tab',{name:'所在群'}).click();await expect(modal.getByText('尚无成功同步的群组快照。')).toBeVisible()
+  await modal.getByRole('tab',{name:'所在群'}).click();await expect(modal.getByText('尚未同步所在群。')).toBeVisible()
   await modal.getByRole('button',{name:'同步群组'}).click();await expect(modal.getByRole('cell',{name:'群主',exact:true})).toBeVisible()
   const managedAfter=await checked<{id:string;agentEnabled:boolean}[]>(await request.get(backend+'/api/groups',{headers}));expect(managedAfter).toEqual(managedBefore);expect(managedAfter.find(g=>g.id===createdGroupId)?.agentEnabled).toBe(false)
   await page.screenshot({path:testInfo.outputPath('account-groups.png'),fullPage:true,animations:'disabled'});await modal.getByRole('button',{name:'关闭',exact:true}).last().click()
