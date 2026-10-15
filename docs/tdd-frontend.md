@@ -1,5 +1,7 @@
 # 前端测试与交接证据
 
+当前验收策略以文末 I19 和账号契约 Revision 5 为准。下列 F1–I18 记录是历史证据；其中账号/群网关替身、合成 Session、模拟栈、展示 route 和 C3/B4 注入测试均已退役，不能作为当前真实平台行为的通过证据或运行指南。
+
 Iris · 前端工程师，F1 attempt1 revision1；模型/强度按主控显式 Sol High 派发，Fast未独立核验。所有代码仅frontend与授权root忽略文件/本记录；未checkout/commit/push，遵守feat/*经PR至dev再main。
 
 已批准seams：用户操作/REST/WS。Testing Library以用户可见页面、表单和按钮为入口；MSW只替代浏览器外HTTP边界，没有mock项目内部模块。Socket仅在网络边界替换。测试无数据库侧通道。
@@ -161,3 +163,25 @@ Iris · 前端工程师，沿用 Sol High，Fast未暴露。范围仅 AccountDet
 I18最终artifact收敛：主控指出tracked浏览器测试不应依赖预先存在的ignored输出目录。已全部改用testInfo.outputPath，颜色JSON通过testInfo.attach进入标准Playwright artifact；tracked测试不依赖本地runner/人工目录。本地仅把结果复制回上述证据目录供查看。仅定向复跑4项反馈用例，feedback-final.log 4 passed / 6.9s；typecheck-artifacts.log通过。没有重复12项unit或生产build；生产代码仍与已通过的新dist一致。全部完成后停止写入，SUBMITTED等待主控部署后只读终验。
 
 I18真实响应语义补充：主控确认Telegram读取成功但username确实为空。列表/详情原位增加verificationSource==='telegram'条件，分别显示“未设置用户名”/“未设置”；尚未读取或模拟来源仍“未获取”，不改API或填造username。先新增一个公共UI用例验证列表→详情，username-red.log缺少“未设置用户名”而失败；最小两处文案修改后username-green.log 1 passed（其余9项未重复，718ms），username-typecheck.log及username-build.log通过（3258 modules、6.43s）。已有12项/4项反馈用例不重复。此前0ee9290部署版5173只读验收的脱敏结果在iris-i18/final-5173.json：身份可见性布尔通过、群数量/角色符合主控已验事实、成功Tag对比度6.400、业务POST与console/pageerror均0；本次自建Web会话退出后refresh401确认撤销，没有真实PII截图。用户名文案的新部署版仍待主控提交/重建后终验，源码冻结SUBMITTED。
+
+## I19：移除账号与网关测试替身（2026-10-15）
+
+Iris · 前端工程师，Sol High，Fast未暴露；按主控冻结的账号Revision 5执行。仅修改frontend与本人组件记录，不操作5173或真实账号，不Git/部署/递归委派。CodeGraph先定位后按磁盘确认；继续使用interface-design与TDD方法，不改现有视觉方向。
+
+先新增公开Account核验来源类型断言：`pnpm --dir frontend typecheck`在原`telegram | simulated | null`类型上报TS2344，types-red.log为实际red；首次沙箱EPERM是工具环境失败，不计产品red。最小改为`telegram | null`后同命令通过，types-green.log。类型断言依赖tsc，Vitest运行结果本身不证明静态类型正确。
+
+移除10份账号/群/消息替身测试文件：Accounts、AccountDetails、ImportGroup、Groups、GroupDetail、Sequences，以及accounts、accounts-layout、account-feedback、platform浏览器测试。Sequences现有全部用例都依赖群HTTP或WS运行，没有独立纯值/UI用例可以原样保留。删除包含C3/B4注入、synthetic SQLite Session、模拟导入检测、61行布局和同步失败缓存的旧覆盖，不计作通过；没有新造替身补回数量。
+
+保留认证/Agent测试与依赖。ApiClient认证并发用例原位改成中性受保护资源与普通value，不再借用账号数组、发送路径或Telegram消息数据；通用RealtimeClient认证/游标用例改用notification普通值，保留鉴权前拒流、重连cursor、重复seq拒绝断言。这些属于通用协议测试，不能证明Telegram消息链路。测试环境matchMedia/ResizeObserver等jsdom shims不构成账号/网关响应，保留。
+
+`pnpm --dir frontend test`：5 files / 13 passed，18.02s（unit-green.log）；仅保留的9项认证客户端、1项登录、1项Agent、1项通用WS和1项类型测试。`pnpm --dir frontend typecheck`通过；`pnpm --dir frontend build`通过，3258 modules / 9.33s（build.log），原大chunk提示未扩展处理。旧账号业务测试不在这13项内。
+
+新增empty-system.spec.ts使用真实HTTP/页面，无route/mock、无Session、无账号/群构造。只在实际GET账号为空后检查登录、上传真实文件引导、1366/1920/2560全宽；viewer隐藏写入口，实际无文件导入请求403。截图使用testInfo.outputPath标准目录。Playwright默认15173/18080，Vite明确代理到E2E_API_URL；local-stack由主控管理，不触5173。真实空栈定向联测与视觉证据待主控服务就绪，未执行不计通过。
+
+限制：本次没有验证真实上传、连接、资料获取、同步/故障保留、429、迟到响应、实际断线恢复、大列表滚动、C3、B4或真实LLM；历史证据与新空系统通过不能替代这些验收。指定账号只读页面验收待主控部署和授权，采用脱敏布尔/计数/样式并撤销自己的Web登录会话。所有本轮本地命令证据位于`.local/inspection-20261015/iris-i19/`。
+
+I19真实空栈定向验收补充：主控提供全新两独立PG库，通过Playwright的E2E_STACK_COMMAND启动local-stack（18080/18081/18082，网关telegram、schema7；无账号/Session），Vite15173。只执行`pnpm --dir frontend exec playwright test e2e/empty-system.spec.ts --reporter=list --output=../.local/inspection-20261015/iris-i19/empty-system-final-results`，2 passed / 11.9s（empty-system-final.log）。实际GET accounts=[]、真实上传指引、1366/1920/2560全宽、viewer无写按钮/实际POST import403与退出均通过，管理员页pageerror断言为空。没有请求导入/连接/同步真实账号，也没有重跑其它测试。
+
+首轮已通过三个布局宽度，在退出按钮exact accessible-name定位等待；主动停止后只改两处退出selector允许既有图标名称，未改产品或timeout。最终截图位于empty-system-final-results/empty-system-真实空系统登录后引导上传真实账号，桌面账号工作区填满可用宽度/empty-accounts-{1366,1920,2560}.png；看图1366/2560无溢出、重叠或右侧限宽空区。截图是实际空系统，不含虚构身份或真实PII。Playwright结束后准确核对自有可执行路径和监听端口，remainingOwnedProcesses=0、remainingListeners=0，记录empty-final-summary.json，附实际本次二进制hash；未接触Docker5173。该视觉来自源码Vite，最终生产镜像视觉由主控另验。
+
+S19结束后按主控授权只补两条既有日志映射：legacy_verification_reset“历史检测结果已重置”、legacy_cached_groups_unverified“历史群缓存待核验”；`pnpm --dir frontend typecheck`再次通过（types-final-mapping.log），没有重复unit/build/E2E。映射后的productionbuild与5173终验由主控负责。源码/测试/本人记录冻结，SUBMITTED。

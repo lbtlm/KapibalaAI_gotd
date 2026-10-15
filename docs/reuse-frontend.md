@@ -1,5 +1,7 @@
 # 前端复用记录
 
+当前实现与测试边界以文末 I19 和账号契约 Revision 5 为准。历史记录中的模拟栈、合成账号/Session、账号/群 route/HTTP 测试实现均已删除，不再是可复用入口；来源记录仅说明当时的演进。
+
 源仓库只读：D:/web_projects/card_code_workspace/go_tg_assistant，源提交 1d7ca2240ec8c41650c27b4c7965baf84cf36a35。本轮先读源 root/frontend AGENTS，实际用 Copy-Item 拷贝下表文件，再原位精简适配。未导入源 .git、Session、生产配置、数据库备份或租户/支付/营销/WebA 模块。
 
 | 原文件（frontend 下） | 当前文件（frontend 下） | 必要适配 |
@@ -43,3 +45,12 @@ F16验证收尾：新的Node22 SQLite实际上传用例、合成展示布局用�
 I18（2026-10-15）：日志结果复用既有 StatusTag / statusPositive / statusDanger，仅补 success 中文映射，替代 AccountDetails 内独立 AntD success/error Tag；无新CSS、主题或依赖。所属群空态原位复用 lastSyncedAt 与现有 React Query 缓存，未新增API、数据推断或“补资料”路径。既有同步失败不替换数据的行为保留，并补明确提示。新增AccountDetails公共UI/HTTP边界用例和极小production-browser颜色/空态回归，浏览器身份字段全部null、群数组为空；没有复制新仓库模块或引入真实账号数据。验证及红绿证据见tdd-frontend.md I18。
 I18浏览器证据生成最终复用Playwright testInfo.outputPath/attach，移除固定ignored输出与前置目录依赖；本地runner只负责选择production preview，不是tracked测试的运行前提。
 I18用户名语义补充复用既有verificationSource与列表/详情渲染，只区分“Telegram已读取且为空”和“尚未获取”，两处原位文本分支，没有新类型/API/默认资料或额外模块。
+
+## I19：真实来源与测试边界收敛（2026-10-15）
+
+原位简化Account类型与AccountTableColumns/AccountDetails：仅保留telegram/null来源、待核验/真实核验文字，移除已被替代的模拟检测/资料分支；保留真实手机号/昵称、已读取空用户名、群三态/失败保留、StatusTag、分组、角色与日志。沿用既有日志动作映射，补import_recovered“恢复导入账号”，没有新组件/接口/依赖。Accounts复用既有LoadState，仅明确上传真实Session/JSON。
+
+移除此前新增及旧有的账号/群网关测试替身、NodeSQLite合成Session流程、route展示夹具与注入E2E，不保留备用运行路径。通用认证/WS测试原位去掉借用的业务数据而保留安全断言；Login/AgentRun/auth-cookies及其MSW依赖不属删除范围。没有为保留覆盖而抽取生产内部逻辑或换名伪装Telegram数据。
+
+必要新增为公开来源类型契约和无拦截的真实空系统浏览器验收；复用Playwright启动配置、登录UI、实际API、testInfo输出，默认隔离15173/18080并配置Vite代理。启动器复用主控scripts/local-stack.mjs，不在frontend复制服务管理。当前README替换旧模拟启动指南，历史组件证据标记退役；新测试通过只证明明确覆盖的空系统与权限行为，未覆盖真实故障如实保留未验证。具体命令与red/green见tdd-frontend.md I19。
+I19最终复用既有日志映射增加两条历史数据处理动作的中文显示，无新模块。退出测试定位按现有含图标按钮的可访问名称原位修正；实际空栈两项通过，三个桌面截图保存在本地标准Playwright输出目录，精确自有进程/端口均清理。源码Vite视觉与主控最终production镜像验收分别记录，不混称。

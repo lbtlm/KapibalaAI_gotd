@@ -9,7 +9,7 @@ import {AccountErrorNotice as ErrorNotice,accountErrorText} from './AccountFeedb
 import StatusTag from './StatusTag'
 import {formatTime} from '../hooks'
 import styles from '../layout/MainLayout.module.scss'
-const actions:Record<string,string>={import:'导入账号',check:'检测账号',connect:'连接账号',disconnect:'标记离线',transition:'变更状态',sync_groups:'同步所在群',group_move:'移动分组',group_rename:'重命名分组',group_delete:'删除分组',connection_ended:'连接已断开',upgrade_disconnect:'升级后断开连接'}
+const actions:Record<string,string>={import:'导入账号',import_recovered:'恢复导入账号',check:'检测账号',connect:'连接账号',disconnect:'标记离线',transition:'变更状态',sync_groups:'同步所在群',group_move:'移动分组',group_rename:'重命名分组',group_delete:'删除分组',connection_ended:'连接已断开',upgrade_disconnect:'升级后断开连接',legacy_verification_reset:'历史检测结果已重置',legacy_cached_groups_unverified:'历史群缓存待核验'}
 const roles={creator:'群主',admin:'管理员',member:'成员',unknown:'角色未知'}
 export default function AccountDetails({id,groups,writable,busy,error,onAction,onClose}:{id:string;groups:AccountGroup[];writable:boolean;busy:boolean;error:unknown;onAction:(a:Account,to:AccountAction)=>void;onClose:()=>void}){
  const cache=useQueryClient(),[tab,setTab]=useState('basic'),[actionFilter,setActionFilter]=useState<string>(),[result,setResult]=useState<string>()
@@ -29,12 +29,12 @@ export default function AccountDetails({id,groups,writable,busy,error,onAction,o
    {key:'basic',label:'基础信息',children:<Descriptions bordered size="small" column={2} items={[
     {key:'id',label:'账号 ID',children:a.id},{key:'platform',label:'Telegram ID',children:a.platformUserId??'未获取'},
     {key:'name',label:'昵称',children:accountName(a)},{key:'username',label:'用户名',children:a.username?'@'+a.username:a.verificationSource==='telegram'?'未设置':'未获取'},
-    {key:'phone',label:'手机号来源',children:a.verificationSource==='simulated'?'模拟资料，未核验手机号':a.phoneVerified?'Telegram 已核验':a.phone?'导入资料，待检测核验':'未获取'},
+    {key:'phone',label:'手机号来源',children:a.phoneVerified?'Telegram 已核验':a.phone?'导入资料，待检测核验':'未获取'},
     {key:'premium',label:'Premium',children:a.premium==null?'未获取':a.premium?'是':'否'},
     {key:'group',label:'账号分组',children:groups.find(g=>g.id===a.groupId)?.name??'未分组'},
     {key:'created',label:'导入时间',children:formatTime(a.createdAt??null)},
     {key:'checked',label:'最近检测',children:formatTime(a.lastCheckedAt??null)},
-    {key:'result',label:'检测结果',children:a.verificationSource==='simulated'?'模拟检测'+(a.lastCheckResult==='failed'?'失败':'成功'):a.lastCheckResult==='success'?'检测成功':a.lastCheckResult==='failed'?'检测失败'+(a.lastCheckError?' · '+a.lastCheckError:''):'尚未检测'},
+    {key:'result',label:'检测结果',children:a.lastCheckResult==='success'?'检测成功':a.lastCheckResult==='failed'?'检测失败'+(a.lastCheckError?' · '+a.lastCheckError:''):'尚未检测'},
     {key:'until',label:'限流截止',children:formatTime(a.rateLimitedUntil)}
    ]}/>},
    {key:'groups',label:'所在群',children:<><ErrorNotice error={joined.error??sync.error}/>{sync.isError&&joined.data?.lastSyncedAt&&<p className={styles.meta}>本次同步失败，仍显示上次同步结果。</p>}<div className={styles.accountDetailToolbar}><span className={styles.meta}>最近同步：{formatTime(joined.data?.lastSyncedAt??null)}</span>{writable&&<Button disabled={!online||busy} loading={sync.isPending} onClick={()=>sync.mutate()}>同步群组</Button>}</div>{!online&&<Alert type="info" title="请先连接并检测账号，再同步所在群。当前显示最近成功缓存。"/>}<p className={styles.meta}>仅展示账号已加入的群，同步不会自动托管群组或启用 AI。</p><Table size="small" rowKey="id" dataSource={joined.data?.items??[]} loading={joined.isLoading} scroll={{x:700,y:320}} pagination={{pageSize:10,showSizeChanger:false}} locale={{emptyText:<LoadState empty={!joined.isLoading} description={groupsEmpty}/>}} columns={[
