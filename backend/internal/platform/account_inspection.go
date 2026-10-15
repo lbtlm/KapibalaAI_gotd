@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func accountGatewayError(e error) error {
@@ -33,7 +35,7 @@ func terminalForError(e error) string {
 	switch externalCode(e) {
 	case "ACCOUNT_SUSPENDED":
 		return "suspended"
-	case "SESSION_EXPIRED":
+	case "SESSION_EXPIRED", "AUTH_KEY_DUPLICATED":
 		return "session_expired"
 	}
 	return ""
@@ -187,12 +189,32 @@ func (a *App) joinedGroups(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 func (a *App) syncJoinedGroups(w http.ResponseWriter, r *http.Request) (err error) {
+	return a.accountGroupOperation(w, r, "")
+}
+func (a *App) joinAccountGroup(w http.ResponseWriter, r *http.Request) error {
+	var b struct {
+		Link string `json:"link"`
+	}
+	if e := decode(r, &b); e != nil {
+		return e
+	}
+	b.Link = strings.TrimSpace(b.Link)
+	if b.Link == "" || len(b.Link) > 512 {
+		return fail(400, "INVALID_GROUP_LINK")
+	}
+	return a.accountGroupOperation(w, r, b.Link)
+}
+func (a *App) accountGroupOperation(w http.ResponseWriter, r *http.Request, link string) (err error) {
 	ctx := r.Context()
 	id := r.PathValue("id")
+	action := "sync_groups"
+	if link != "" {
+		action = "join_group"
+	}
 	logged := false
 	defer func() {
 		if err != nil && !logged {
-			a.recordAccountAttempt(ctx, id, "sync_groups", err)
+			a.recordAccountAttempt(ctx, id, action, err)
 		}
 	}()
 	tx, e := a.pool.Begin(ctx)
@@ -201,7 +223,11 @@ func (a *App) syncJoinedGroups(w http.ResponseWriter, r *http.Request) (err erro
 	}
 	defer tx.Rollback(ctx)
 	var status string
-	e = tx.QueryRow(ctx, `SELECT status FROM accounts WHERE id=$1 FOR UPDATE`, id).Scan(&status)
+	e = tx.QueryRow(ctx, `SELECT status FROM accounts WHERE id=$1 FOR UPDATE NOWAIT`, id).Scan(&status)
+	var busy *pgconn.PgError
+	if errors.As(e, &busy) && busy.Code == "55P03" {
+		return fail(409, "ACCOUNT_IN_USE")
+	}
 	if e == pgx.ErrNoRows {
 		return fail(404, "ACCOUNT_NOT_FOUND")
 	}
@@ -215,7 +241,15 @@ func (a *App) syncJoinedGroups(w http.ResponseWriter, r *http.Request) (err erro
 		return fail(409, "ACCOUNT_OFFLINE")
 	}
 	v := joinedSnapshot{Items: []joinedGroup{}}
-	if e = a.gateway(ctx, "GET", "/accounts/"+id+"/joined-groups", nil, &v); e != nil {
+	var joined struct {
+		Status string `json:"status"`
+	}
+	if link == "" {
+		e = a.gateway(ctx, "GET", "/accounts/"+id+"/joined-groups", nil, &v)
+	} else {
+		e = a.gateway(ctx, "POST", "/accounts/"+id+"/join", map[string]string{"link": link}, &joined)
+	}
+	if e != nil {
 		terminal := terminalForError(e)
 		if terminal != "" {
 			if saveErr := transition(ctx, tx, id, status, terminal, nil); saveErr != nil {
@@ -229,7 +263,7 @@ func (a *App) syncJoinedGroups(w http.ResponseWriter, r *http.Request) (err erro
 			}
 		}
 		if terminal != "" || externalCode(e) == "RATE_LIMITED" {
-			if saveErr := writeAccountLog(ctx, tx, id, actor(ctx), "sync_groups", e); saveErr != nil {
+			if saveErr := writeAccountLog(ctx, tx, id, actor(ctx), action, e); saveErr != nil {
 				return saveErr
 			}
 			if saveErr := tx.Commit(ctx); saveErr != nil {
@@ -238,6 +272,19 @@ func (a *App) syncJoinedGroups(w http.ResponseWriter, r *http.Request) (err erro
 			logged = true
 		}
 		return accountGatewayError(e)
+	}
+	if link != "" {
+		if joined.Status != "joined" && joined.Status != "already_member" && joined.Status != "approval_pending" {
+			return fail(502, "GATEWAY_PROTOCOL_ERROR")
+		}
+		if e = writeAccountLog(ctx, tx, id, actor(ctx), action, nil); e != nil {
+			return e
+		}
+		if e = tx.Commit(ctx); e != nil {
+			return e
+		}
+		respond(w, 200, joined)
+		return nil
 	}
 	if v.Items == nil {
 		return fail(502, "GATEWAY_PROTOCOL_ERROR")

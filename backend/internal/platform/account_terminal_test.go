@@ -29,6 +29,7 @@ func TestTerminalAccountOperationsReturnCauseAndPreserveEvidence(t *testing.T) {
 				{"/check", `{"connectIfNeeded":true}`},
 				{"/connect", `{}`},
 				{"/joined-groups/sync", `{}`},
+				{"/join", `{"link":"https://t.me/example_group"}`},
 			} {
 				st, b, _ := call(t, s, "POST", "/api/accounts/terminal-input"+request.path, token, request.body)
 				if st != tc.http || b["error"].(map[string]any)["code"] != tc.code {

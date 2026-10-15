@@ -121,7 +121,7 @@ func (a *TelegramAdapter) Resume(s *Service) {
 				switch e.Code {
 				case "ACCOUNT_SUSPENDED":
 					s.terminal(id, "suspended")
-				case "SESSION_EXPIRED":
+				case "SESSION_EXPIRED", "AUTH_KEY_DUPLICATED":
 					s.terminal(id, "session_expired")
 				default:
 					s.ordinaryOffline(id, connectionID)
@@ -220,9 +220,10 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (pid string, e
 		return "", &APIError{503, "CREDENTIALS_INCOMPLETE", 0}
 	}
 	var manager *updates.Manager
-	client := telegram.NewClient(c.APIID, c.APIHash, telegram.Options{SessionStorage: storage, UpdateHandler: telegram.UpdateHandlerFunc(func(ctx context.Context, u tg.UpdatesClass) error { return manager.Handle(ctx, u) }), MigrationTimeout: 120 * time.Second, Device: telegram.DeviceConfig{DeviceModel: c.DeviceModel, SystemVersion: c.SystemVersion, AppVersion: c.AppVersion, LangCode: "en", SystemLangCode: "en-US"}})
+	var pipeline *UpdatePipeline
+	client := telegram.NewClient(c.APIID, c.APIHash, telegram.Options{SessionStorage: storage, Logger: startupLogger(id, func(err error) { pipeline.gate.fail(err) }), UpdateHandler: telegram.UpdateHandlerFunc(func(ctx context.Context, u tg.UpdatesClass) error { return manager.Handle(ctx, u) }), MigrationTimeout: 120 * time.Second, Device: telegram.DeviceConfig{DeviceModel: c.DeviceModel, SystemVersion: c.SystemVersion, AppVersion: c.AppVersion, LangCode: "en", SystemLangCode: "en-US"}})
 	s.client, s.api = client, a.fencedClient(tg.NewClient(client))
-	pipeline := a.Updates(id, s.api, cancel)
+	pipeline = a.Updates(id, s.api, cancel)
 	manager = updates.New(updates.Config{Handler: pipeline.Handler, Storage: pipeline.Storage, AccessHasher: pipeline.AccessHasher, OnChannelTooLong: pipeline.OnChannelTooLong})
 	ready := make(chan error, 1)
 	runStarted = true
@@ -236,12 +237,12 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (pid string, e
 			s.self = self
 			return pipeline.Run(live, manager, self.ID, updates.AuthOptions{IsBot: self.Bot, OnStart: func(context.Context) { ready <- nil }})
 		})
+		if failure := pipeline.gate.err(); failure != nil {
+			err = failure
+		}
 		select {
 		case ready <- err:
 		default:
-		}
-		if failure := pipeline.gate.err(); failure != nil {
-			err = failure
 		}
 		if err != nil && !errors.Is(err, context.Canceled) {
 			slog.Warn("Telegram connection ended", "accountId", id, "code", platformError(err).Error())
@@ -272,6 +273,9 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (pid string, e
 		return stringID(s.self.ID), nil
 	case <-connectCtx.Done():
 		cancel()
+		if failure := pipeline.gate.err(); failure != nil {
+			return "", platformError(failure)
+		}
 		return "", &APIError{504, "NETWORK_TIMEOUT", 0}
 	}
 }
@@ -370,7 +374,7 @@ func (a *TelegramAdapter) connectionEnded(id string, old *onlineSession, err err
 	switch e.Code {
 	case "ACCOUNT_SUSPENDED":
 		s.terminal(id, "suspended")
-	case "SESSION_EXPIRED":
+	case "SESSION_EXPIRED", "AUTH_KEY_DUPLICATED":
 		s.terminal(id, "session_expired")
 	default:
 		s.ordinaryOffline(id, old.connectionID)
@@ -397,7 +401,9 @@ func platformError(err error) *APIError {
 		permanentCode = rpc.Type
 	}
 	switch permanentCode {
-	case "USERNAME_OCCUPIED", "USERNAME_INVALID", "USERNAME_PURCHASE_AVAILABLE", "CHANNELS_ADMIN_PUBLIC_TOO_MUCH":
+	case "AUTH_KEY_DUPLICATED":
+		return &APIError{401, permanentCode, 0}
+	case "USERNAME_OCCUPIED", "USERNAME_INVALID", "USERNAME_NOT_OCCUPIED", "USERNAME_PURCHASE_AVAILABLE", "CHANNELS_ADMIN_PUBLIC_TOO_MUCH", "CHANNELS_TOO_MUCH", "USERS_TOO_MUCH", "USER_BANNED_IN_CHANNEL":
 		return &APIError{422, permanentCode, 0}
 	case "USER_DEACTIVATED", "USER_DEACTIVATED_BAN", "PHONE_NUMBER_BANNED", "USER_RESTRICTED":
 		return &APIError{403, "ACCOUNT_SUSPENDED", 0}

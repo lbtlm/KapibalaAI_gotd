@@ -235,3 +235,5 @@ Red: connect inherited12s despite Gateway30s readiness, and a closed connection 
 ## R23 controller: workspace semantics and independent workers
 
 See workspace-refinement-20261015.md R23 for red/green evidence. Reused jobs, audit/effect receipts, sequence snapshots and advisory leases. Account-specific connection ownership unchanged. Actual PostgreSQL reds: chosen administrator ignored, end-marketing left triggers enabled, preview omitted bound actors, slow group task blocked another group. Normal16top and race19top/sub passes; migration reconstruction covered. No Gateway substitutes, Sessions or real Telegram operations. Provider-only fixtures retain their existing boundary. Limits reserve sending capacity while Agents await receipts; app shutdown cancels and joins all workers.
+
+R24 controller: terminal join endpoint red404 then green explicit401/403, reusing account-group operation locking/logging. Concrete AUTH_KEY_DUPLICATED stays401 and maps to session_expired; focused terminal event/API race checks pass. No simulated Gateway was used.

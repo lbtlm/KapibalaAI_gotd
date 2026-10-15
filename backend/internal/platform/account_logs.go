@@ -24,7 +24,9 @@ func safeAccountCode(e error) string {
 	var x *externalError
 	if errors.As(e, &x) {
 		switch x.Code {
-		case "ACCOUNT_SUSPENDED", "SESSION_EXPIRED", "ACCOUNT_OFFLINE", "ACCOUNT_IN_USE", "ACCOUNT_RETIRED", "CONNECTION_ENDED", "CONNECTION_CONFLICT", "RATE_LIMITED", "NETWORK_TIMEOUT", "GATEWAY_UNAVAILABLE", "ACCOUNT_IMPORT_CONFLICT", "INVALID_SESSION", "INVALID_CREDENTIALS", "INVALID_INPUT":
+		case "INVALID_GROUP_LINK", "NOT_A_GROUP", "INVITE_EXPIRED", "USERNAME_NOT_OCCUPIED", "USERNAME_INVALID", "CHANNELS_TOO_MUCH", "USERS_TOO_MUCH", "USER_BANNED_IN_CHANNEL", "GROUP_WRITE_FORBIDDEN", "NO_PERMISSION":
+			return x.Code
+		case "AUTH_KEY_DUPLICATED", "ACCOUNT_SUSPENDED", "SESSION_EXPIRED", "ACCOUNT_OFFLINE", "ACCOUNT_IN_USE", "ACCOUNT_RETIRED", "CONNECTION_ENDED", "CONNECTION_CONFLICT", "RATE_LIMITED", "NETWORK_TIMEOUT", "GATEWAY_UNAVAILABLE", "ACCOUNT_IMPORT_CONFLICT", "INVALID_SESSION", "INVALID_CREDENTIALS", "INVALID_INPUT":
 			return x.Code
 		}
 		return "GATEWAY_ERROR"
@@ -53,7 +55,7 @@ func (a *App) recordAccountAttempt(ctx context.Context, id, action string, err e
 	var exists bool
 	if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM accounts WHERE id=$1)`, id).Scan(&exists); e == nil && exists {
 		if action == "check" && err != nil {
-			if _, e = tx.Exec(ctx, `UPDATE accounts SET last_checked_at=now(),last_check_result='failed',last_check_error=$2 WHERE id=$1 AND (status NOT IN ('suspended','session_expired') OR (status='suspended' AND $2='ACCOUNT_SUSPENDED') OR (status='session_expired' AND $2='SESSION_EXPIRED'))`, id, safeAccountCode(err)); e != nil {
+			if _, e = tx.Exec(ctx, `UPDATE accounts SET last_checked_at=now(),last_check_result='failed',last_check_error=$2 WHERE id=$1 AND (status NOT IN ('suspended','session_expired') OR (status='suspended' AND $2='ACCOUNT_SUSPENDED') OR (status='session_expired' AND $2 IN ('SESSION_EXPIRED','AUTH_KEY_DUPLICATED')))`, id, safeAccountCode(err)); e != nil {
 				return
 			}
 		}

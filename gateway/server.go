@@ -118,6 +118,7 @@ func New(parent context.Context, c Config) (*Service, error) {
 	s.mux.HandleFunc("DELETE /accounts/{accountId}", s.deleteAccountHTTP)
 	s.mux.HandleFunc("GET /accounts/{accountId}/registration", s.registrationHTTP)
 	s.mux.HandleFunc("POST /accounts/{accountId}/check", s.inspectHTTP)
+	s.mux.HandleFunc("POST /accounts/{accountId}/join", s.inspectHTTP)
 	s.mux.HandleFunc("GET /accounts/{accountId}/joined-groups", s.inspectHTTP)
 	s.mux.HandleFunc("POST /groups", s.groupHTTP)
 	s.mux.HandleFunc("POST /groups/import", s.importHTTP)

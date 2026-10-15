@@ -166,6 +166,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("POST /api/accounts/{id}/check", a.wrap(a.checkAccount, false))
 	m.HandleFunc("GET /api/accounts/{id}/joined-groups", a.wrap(a.joinedGroups, false))
 	m.HandleFunc("POST /api/accounts/{id}/joined-groups/sync", a.wrap(a.syncJoinedGroups, false))
+	m.HandleFunc("POST /api/accounts/{id}/join", a.wrap(a.joinAccountGroup, false))
 	m.HandleFunc("GET /api/account-groups", a.wrap(a.accountGroups, false))
 	m.HandleFunc("POST /api/account-groups", a.wrap(a.createAccountGroup, false))
 	m.HandleFunc("PATCH /api/account-groups/{id}", a.wrap(a.renameAccountGroup, false))

@@ -273,11 +273,7 @@ func (a *App) connectAccount(ctx context.Context, id string) error {
 	e = a.gateway(ctx, "POST", "/accounts/"+id+"/connect", map[string]any{"connectionId": connectionID}, &out)
 	if e != nil {
 		code := externalCode(e)
-		if code == "ACCOUNT_SUSPENDED" || code == "SESSION_EXPIRED" {
-			to := "suspended"
-			if code == "SESSION_EXPIRED" {
-				to = "session_expired"
-			}
+		if to := terminalForError(e); to != "" {
 			if err := transition(ctx, tx, id, status, to, nil); err != nil {
 				return err
 			}

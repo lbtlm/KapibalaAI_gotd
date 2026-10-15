@@ -4,6 +4,7 @@ import {ApiError} from '../api/client'
 import {AccountErrorNotice} from './AccountFeedback'
 
 test.each([
+ ['AUTH_KEY_DUPLICATED','Telegram 检测到授权重复使用，Session 已失效。请重新登录生成新的 Session 后导入'],
  ['SESSION_EXPIRED','会话已失效，无法重新连接'],
  ['ACCOUNT_SUSPENDED','账号已停用，无法重新连接'],
  ['ILLEGAL_TRANSITION','当前账号状态不允许此操作']

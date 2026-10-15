@@ -2,11 +2,20 @@ package platform
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"testing"
 	"time"
 )
+
+func TestDuplicatedAuthorizationKeepsSpecificCauseAndTerminalState(t *testing.T) {
+	input := &externalError{Status: 401, Code: "AUTH_KEY_DUPLICATED"}
+	var output *apiError
+	if !errors.As(accountGatewayError(input), &output) || output.status != 401 || output.code != "AUTH_KEY_DUPLICATED" || safeAccountCode(input) != "AUTH_KEY_DUPLICATED" || terminalForError(input) != "session_expired" {
+		t.Fatal("duplicated authorization lost its public cause or terminal status")
+	}
+}
 
 func TestGatewayConnectionBudgetDoesNotCutOffReadiness(t *testing.T) {
 	a := &App{cfg: Config{GatewayURL: "http://gateway"}, client: &http.Client{Timeout: 12 * time.Second}}

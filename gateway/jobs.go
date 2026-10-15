@@ -32,7 +32,7 @@ func (s *Service) accountFailure(aid string, err error) error {
 	switch api.Code {
 	case "ACCOUNT_SUSPENDED":
 		status = "suspended"
-	case "SESSION_EXPIRED":
+	case "SESSION_EXPIRED", "AUTH_KEY_DUPLICATED":
 		status = "session_expired"
 	}
 	if acct := s.state.Accounts[aid]; status != "" && acct != nil && acct.Status != status {

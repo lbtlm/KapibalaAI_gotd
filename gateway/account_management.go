@@ -199,6 +199,17 @@ func (s *Service) registerHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Service) inspectHTTP(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("accountId")
 	op := "check"
+	var link string
+	if strings.HasSuffix(r.URL.Path, "/join") {
+		var in struct {
+			Link string `json:"link"`
+		}
+		if decode(r, &in) != nil {
+			fail(w, &APIError{400, "INVALID_INPUT", 0})
+			return
+		}
+		link, op = in.Link, "join"
+	}
 	if r.Method == "GET" {
 		op = "joined-groups"
 	}
@@ -216,7 +227,12 @@ func (s *Service) inspectHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	connectionID := s.state.Accounts[id].ConnectionID
 	s.mu.Unlock()
-	out, err := s.cfg.Telegram.Inspect(opCtx, id, op)
+	var out any
+	if op == "join" {
+		out, err = s.cfg.Telegram.JoinLink(opCtx, id, link)
+	} else {
+		out, err = s.cfg.Telegram.Inspect(opCtx, id, op)
+	}
 	s.mu.Lock()
 	if e := opCtx.Err(); e != nil {
 		fail(w, e)

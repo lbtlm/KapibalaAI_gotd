@@ -9,7 +9,7 @@ func TestDuplicateConnectCannotFinalizeOwnersFailedAttempt(t *testing.T) {
 	for _, code := range []struct {
 		code, status string
 		httpStatus   int
-	}{{"SESSION_EXPIRED", "session_expired", 401}, {"ACCOUNT_SUSPENDED", "suspended", 403}, {"NETWORK_TIMEOUT", "idle", 504}} {
+	}{{"AUTH_KEY_DUPLICATED", "session_expired", 401}, {"SESSION_EXPIRED", "session_expired", 401}, {"ACCOUNT_SUSPENDED", "suspended", 403}, {"NETWORK_TIMEOUT", "idle", 504}} {
 		t.Run(code.code, func(t *testing.T) {
 			// A's Run has ended, but A is paused before taking Service.mu to
 			// classify its result. B reaches the actual adapter first.
