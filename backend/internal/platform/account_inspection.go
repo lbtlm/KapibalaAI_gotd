@@ -52,6 +52,9 @@ func (a *App) checkAccount(w http.ResponseWriter, r *http.Request) (err error) {
 	if e != nil {
 		return e
 	}
+	if e = accountTerminalError(current.Status); e != nil {
+		return e
+	}
 	if current.Status == "idle" || current.Status == "disconnected" {
 		if !b.ConnectIfNeeded {
 			return fail(409, "ACCOUNT_OFFLINE")
@@ -71,6 +74,9 @@ func (a *App) checkAccount(w http.ResponseWriter, r *http.Request) (err error) {
 	defer tx.Rollback(ctx)
 	current, e = scanAccount(tx.QueryRow(ctx, `SELECT `+accountColumns+` FROM accounts WHERE id=$1 FOR UPDATE`, id))
 	if e != nil {
+		return e
+	}
+	if e = accountTerminalError(current.Status); e != nil {
 		return e
 	}
 	if current.Status != "online" && current.Status != "rate_limited" {
@@ -193,17 +199,27 @@ func (a *App) syncJoinedGroups(w http.ResponseWriter, r *http.Request) (err erro
 	if e != nil {
 		return e
 	}
+	if e = accountTerminalError(status); e != nil {
+		return e
+	}
 	if status != "online" {
 		return fail(409, "ACCOUNT_OFFLINE")
 	}
 	v := joinedSnapshot{Items: []joinedGroup{}}
 	if e = a.gateway(ctx, "GET", "/accounts/"+id+"/joined-groups", nil, &v); e != nil {
-		if externalCode(e) == "RATE_LIMITED" {
+		terminal := terminalForError(e)
+		if terminal != "" {
+			if saveErr := transition(ctx, tx, id, status, terminal, nil); saveErr != nil {
+				return saveErr
+			}
+		} else if externalCode(e) == "RATE_LIMITED" {
 			var limit *externalError
 			errors.As(e, &limit)
 			if saveErr := applyAccountRateLimit(ctx, tx, id, limit.RetryAfterSeconds); saveErr != nil {
 				return saveErr
 			}
+		}
+		if terminal != "" || externalCode(e) == "RATE_LIMITED" {
 			if saveErr := writeAccountLog(ctx, tx, id, actor(ctx), "sync_groups", e); saveErr != nil {
 				return saveErr
 			}

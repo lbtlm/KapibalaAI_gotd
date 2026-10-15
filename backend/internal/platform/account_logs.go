@@ -53,7 +53,7 @@ func (a *App) recordAccountAttempt(ctx context.Context, id, action string, err e
 	var exists bool
 	if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM accounts WHERE id=$1)`, id).Scan(&exists); e == nil && exists {
 		if action == "check" && err != nil {
-			if _, e = tx.Exec(ctx, `UPDATE accounts SET last_checked_at=now(),last_check_result='failed',last_check_error=$2 WHERE id=$1`, id, safeAccountCode(err)); e != nil {
+			if _, e = tx.Exec(ctx, `UPDATE accounts SET last_checked_at=now(),last_check_result='failed',last_check_error=$2 WHERE id=$1 AND (status NOT IN ('suspended','session_expired') OR (status='suspended' AND $2='ACCOUNT_SUSPENDED') OR (status='session_expired' AND $2='SESSION_EXPIRED'))`, id, safeAccountCode(err)); e != nil {
 				return
 			}
 		}

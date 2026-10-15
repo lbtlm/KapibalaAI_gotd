@@ -216,6 +216,9 @@ func (a *App) processEvent(ctx context.Context, id int64) error {
 					_, e = tx.Exec(ctx, `UPDATE accounts SET connection_id=NULL WHERE id=$1 AND connection_id=$2`, str("accountId"), str("connectionId"))
 				}
 			} else {
+				if accountTerminalError(from) != nil && accountTerminalError(str("status")) != nil {
+					break
+				}
 				e = transition(ctx, tx, str("accountId"), from, str("status"), nil)
 			}
 		}

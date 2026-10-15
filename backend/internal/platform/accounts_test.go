@@ -34,7 +34,7 @@ func TestConcurrentAccountCASHasOneWinnerAndTerminalCannotReconnect(t *testing.T
 		t.Fatalf("expected one CAS winner: %d/%d", ok, conflict)
 	}
 	st, body, _ := call(t, s, "POST", "/api/accounts/account-1/connect", token, "{}")
-	if st != 409 || body["error"].(map[string]any)["code"] != "ILLEGAL_TRANSITION" {
+	if st != 403 || body["error"].(map[string]any)["code"] != "ACCOUNT_SUSPENDED" {
 		t.Fatalf("terminal reconnected: %d %v", st, body)
 	}
 }

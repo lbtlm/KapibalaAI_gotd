@@ -50,6 +50,16 @@ var edges = map[string]map[string]bool{
 	"idle": {"online": true, "suspended": true, "session_expired": true}, "online": {"idle": true, "rate_limited": true, "disconnected": true, "suspended": true, "session_expired": true}, "rate_limited": {"online": true, "disconnected": true, "suspended": true, "session_expired": true}, "disconnected": {"idle": true, "online": true, "suspended": true, "session_expired": true},
 }
 
+func accountTerminalError(status string) error {
+	switch status {
+	case "session_expired":
+		return fail(401, "SESSION_EXPIRED")
+	case "suspended":
+		return fail(403, "ACCOUNT_SUSPENDED")
+	}
+	return nil
+}
+
 func (a *App) accounts(w http.ResponseWriter, r *http.Request) error {
 	rows, e := a.pool.Query(r.Context(), `SELECT `+accountColumns+` FROM accounts ORDER BY id`)
 	if e != nil {
@@ -214,6 +224,9 @@ func (a *App) connectAccount(ctx context.Context, id string) error {
 	if e != nil {
 		return e
 	}
+	if e = accountTerminalError(status); e != nil {
+		return e
+	}
 	if status != "idle" && status != "disconnected" {
 		return fail(409, "ILLEGAL_TRANSITION")
 	}
@@ -242,6 +255,9 @@ func (a *App) connectAccount(ctx context.Context, id string) error {
 	}
 	defer tx.Rollback(ctx)
 	if e = tx.QueryRow(ctx, `SELECT status,connection_id FROM accounts WHERE id=$1 FOR UPDATE`, id).Scan(&status, &incarnation); e != nil {
+		return e
+	}
+	if e = accountTerminalError(status); e != nil {
 		return e
 	}
 	if incarnation == nil || *incarnation != connectionID {
