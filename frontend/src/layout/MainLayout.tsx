@@ -4,7 +4,7 @@ import {UserOutlined,TeamOutlined,OrderedListOutlined,LogoutOutlined,ApiOutlined
 import {Outlet,useNavigate,useLocation} from 'react-router-dom'
 import {useQueryClient} from '@tanstack/react-query'
 import {api} from '../api/client'
-import {invalidateAccountState} from '../api/account-cache'
+import {invalidateAccountState,removeAccountState} from '../api/account-cache'
 import {RealtimeClient,type ConnectionState,type StreamEvent} from '../api/realtime'
 import {useSession} from '../hooks'
 import styles from './MainLayout.module.scss'
@@ -18,6 +18,7 @@ export default function MainLayout(){
    const p=event.payload
    if(event.type==='inconsistency')setIncident(String(p.message??'网关与数据库状态出现差异'))
    if(event.type==='account_status_changed'||event.type==='account_terminal'){void invalidateAccountState(cache);void cache.invalidateQueries({queryKey:['group']})}
+   if(event.type==='account_deleted'&&typeof p.accountId==='string')void removeAccountState(cache,p.accountId)
    if(event.type==='message')void cache.invalidateQueries({queryKey:['messages',p.groupId]})
    if(event.type==='agent_run'){void cache.invalidateQueries({queryKey:['agent-runs',p.groupId]});void cache.invalidateQueries({queryKey:['agent-run',p.runId]})}
    if(event.type==='sequence_run')void cache.invalidateQueries({queryKey:['sequence-run',p.runId]})

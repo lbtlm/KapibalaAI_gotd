@@ -205,3 +205,25 @@ red后向主控报告三个可证伪假设：1业务401走refresh/replay清sessi
 生产artifact：index-CwaG6Tsh.js SHA256 CE2948DF793915BFF72E2F58AB88C3ADECDCE7B7B21AB01F7A471B0CB3E545A7；CSS仍index-gBi7et6o.css，SHA256 D6799A9B78D5261061B96F12DB17485170BC815A8B2D31805B24D1802C660CB6。本轮证据全部在`.local/inspection-20261015/iris-i20/`，artifact-hashes.json保留机器可读值。
 
 限制：本轮没有运行真实check/connect/sync或强制账号失效，也没有浏览器重连/窗口恢复真实故障验收；没有必要重复无法触及终态场景的空栈E2E。精确后台终态状态/code由Orion/Niko修复与验证，实际已上传账号业务按用户选择留待手动验收。上述纯条件、普通QueryClient值和中性auth transport通过不等同真实Telegram链路通过。源码与本记录稳定后冻结，SUBMITTED等待主控集成/独立review。
+
+## I21：单账号删除（2026-10-15，Revision 8）
+
+Iris · 前端工程师，复用已批准Sol High，Fast未暴露。基线5ed55b6，按共享契约Revision 8实施；无分支/Git提交、递归、真实账号/凭据读取或5173操作。先CodeGraph定位，沿用AntD组件、Accounts集中mutation、I20账号缓存与错误显示。早期202/pending/CAS建议已被用户简化要求替代，本实现不保留这些路径。
+
+列表和详情复用AccountDeleteButton，admin单账号入口，idle/disconnected/session_expired/suspended可确认，online/rate_limited/connecting禁用并提示先离线；未知状态不放行。终态删除独立于A1连接动作。Accounts持有目标ID并渲染一份DeleteAccountDialog，使用当前列表状态，状态变化可禁止确认；依赖占用仍由后端权威判断。确认文字仅说明本系统账号/凭据，不删除Telegram账号或退出其他设备。确认使用同步ref锁和pending/loading，防同帧双击，未结束不能取消；失败留窗、记录和选择，手动重试，不自动重放DELETE。
+
+按冻结契约发DELETE /api/accounts/:id，无body；204后关匹配详情/确认并prune选择，removeAccountState原位扩展现有缓存模块：过滤列表目标、清目标详情/所有筛选日志/群快照、刷新列表与分组计数，保留其他账号和历史业务缓存。MainLayout处理account_deleted {accountId}复用同一能力；列表实际集合变化时Accounts关闭匹配详情/确认并prune消失的选择，支持其他窗口删除。删除最后一行后将分页限制在有效页。没有额外状态层、事件轮询、批量删除或删除worker。
+
+沿用AccountFeedback：error.reason直接从ApiError.details.reason读取，区别active_connection/managed_group/pending_message/active_job/active_effect和安全网关fallback；未知原因使用总说明，原code始终保留。ACCOUNT_RETIRED、ACCOUNT_DELETE_INCOMPLETE与NETWORK_TIMEOUT都有中文后续提示。日志枚举补delete“删除账号”。新增AccountDeletion组件仅因为列表/详情需共用有状态确认与权限/禁用说明，不复制两套删除流程；未引依赖/主题/CSS。
+
+TDD证据均为纯props、直接错误值或真实QueryClient普通缓存键/字符串/ID，不包含account/gateway HTTP、Session或RPC替身。cache-feedback-red.log为5failed/4passed（目标缓存未清理+四个删除错误未中文化）；dialog-red.log复现三种不可删状态仍可点，以及双击onConfirm调用2次。该日志另有AntD prepare帧立即可见断言问题，不计产品red。最小安全实现后cache/错误已绿，slice-green.log剩4项仅在过渡prepare帧检查可见性，改为等待真实Tooltip/Modal可见后全绿，未修改产品动画或timeout。
+
+最终定向命令：`pnpm --dir frontend exec vitest run src/api/auth-failure.test.ts src/api/account-cache.test.ts src/api/client.test.ts src/components/AccountFeedback.test.tsx src/api/realtime.test.ts src/components/AccountDeletion.test.tsx --reporter=verbose`，6files/36passed、14.06s（affected-green.log），包含原20项受影响安全回归。新控件覆盖四个可删状态、三种先离线状态、viewer隐藏、取消无提交、双击一次/提交中禁取消、失败留窗与可重试。QueryClient覆盖只移除目标、不损其他缓存与分组计数失效。初次typecheck发现新测试借用了Playwright的exact选项；Testing Library name字符串默认精确，删除该无效选项后typecheck-final.log通过，运行时查询语义不变，未重复36项。
+
+`pnpm --dir frontend build`通过，3260modules/8.81s（build.log），原大chunk提示保留。产物index-BSdZKMfN.js SHA256 3216C82494B4A8972199D92E3D47BC314DE19A5AAF7C750808838858D115DF1D；CSS index-gBi7et6o.css / D6799A9B78D5261061B96F12DB17485170BC815A8B2D31805B24D1802C660CB6未变。artifact-hashes.json/source-hashes.json位于`.local/inspection-20261015/iris-i21/`。
+
+主控批准仅扩既有两条empty-system E2E：实际accounts=[]后，admin删除不存在ID两次204；viewer无删除入口且DELETE403，不创建任何账号。该测试编辑后的typecheck-with-empty-e2e.log通过，生产源未变，未重复unit/build。实际schema9服务由主控先交Orion再统一交接，当前尚未启动/执行浏览器，不用旧schema重复验收。
+
+边界：纯控件回调不伪造API成功，缓存值不冒充Telegram资料；本轮未验证真实已上传账号成功删除、占用拒绝、跨库不完整重试、真实凭据清理或跨窗口真实删除。后端/网关真实PG边界由各owner提供，用户现有五账号完整保留待手动验收。源码冻结SUBMITTED，等待主控独立review和schema9真实空栈联测。
+
+I21主控确认对象修正：删除确认仅随机内部ID不易核对，现复用当前Account.phone及既有accountName；手机号/昵称有值才显示，内部ID始终显示且请求仍绑定deleting ID，不读凭据、不增加API或样式。先加纯props文本输入断言，identity-red.log 1failed/11passed（手机号未显示）；最小props/文本改后identity-green.log 12passed/9.54s。输入为非真实的说明性字符串，不构造账号/网关响应。identity-typecheck.log通过，identity-build.log通过3260modules/7.65s；原缓存/transport结果复用，未重复36项。最新产物index-D3K4atoX.js SHA256 6261872789FBBEDB329E6E0E4CDB69EA93563935CDDADB2899E535489B261A3D，CSS未变。artifact/source-hashes已更新；源码再冻结，实际schema9空栈仍待主控交接。

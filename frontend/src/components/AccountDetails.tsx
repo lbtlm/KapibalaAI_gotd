@@ -8,11 +8,12 @@ import {accountName,type AccountAction} from './AccountTableColumns'
 import {LoadState} from './Feedback'
 import {AccountErrorNotice as ErrorNotice,accountErrorText} from './AccountFeedback'
 import StatusTag from './StatusTag'
+import {AccountDeleteButton} from './AccountDeletion'
 import {formatTime} from '../hooks'
 import styles from '../layout/MainLayout.module.scss'
-const actions:Record<string,string>={import:'导入账号',import_recovered:'恢复导入账号',check:'检测账号',connect:'连接账号',disconnect:'标记离线',transition:'变更状态',sync_groups:'同步所在群',group_move:'移动分组',group_rename:'重命名分组',group_delete:'删除分组',connection_ended:'连接已断开',upgrade_disconnect:'升级后断开连接',legacy_verification_reset:'历史检测结果已重置',legacy_cached_groups_unverified:'历史群缓存待核验'}
+const actions:Record<string,string>={import:'导入账号',import_recovered:'恢复导入账号',delete:'删除账号',check:'检测账号',connect:'连接账号',disconnect:'标记离线',transition:'变更状态',sync_groups:'同步所在群',group_move:'移动分组',group_rename:'重命名分组',group_delete:'删除分组',connection_ended:'连接已断开',upgrade_disconnect:'升级后断开连接',legacy_verification_reset:'历史检测结果已重置',legacy_cached_groups_unverified:'历史群缓存待核验'}
 const roles={creator:'群主',admin:'管理员',member:'成员',unknown:'角色未知'}
-export default function AccountDetails({id,groups,writable,busy,error,onAction,onClose}:{id:string;groups:AccountGroup[];writable:boolean;busy:boolean;error:unknown;onAction:(a:Account,to:AccountAction)=>void;onClose:()=>void}){
+export default function AccountDetails({id,groups,writable,busy,error,onAction,onDelete,onClose}:{id:string;groups:AccountGroup[];writable:boolean;busy:boolean;error:unknown;onAction:(a:Account,to:AccountAction)=>void;onDelete:(a:Account)=>void;onClose:()=>void}){
  const cache=useQueryClient(),[tab,setTab]=useState('basic'),[actionFilter,setActionFilter]=useState<string>(),[result,setResult]=useState<string>()
  const account=useQuery({queryKey:['account',id],queryFn:()=>api.request<Account>('/api/accounts/'+encodeURIComponent(id))})
  const joined=useQuery({queryKey:['account-joined-groups',id],queryFn:()=>api.request<JoinedGroups>('/api/accounts/'+encodeURIComponent(id)+'/joined-groups'),enabled:tab==='groups'})
@@ -25,7 +26,7 @@ export default function AccountDetails({id,groups,writable,busy,error,onAction,o
   <ErrorNotice error={account.error??error}/>
   <LoadState loading={account.isLoading}/>
   {account.isError&&<Button onClick={()=>account.refetch()}>重试加载详情</Button>}
-  {a&&<><div className={styles.accountDetailHeading}><div><Typography.Title level={4} style={{margin:0}}>{accountName(a)}</Typography.Title><Space><Typography.Text copyable={a.phone?{text:a.phone}:false}>{a.phone??'未获取手机号'}</Typography.Text><StatusTag status={a.status}/></Space></div>{writable&&!terminal&&<Space>{['idle','disconnected','online'].includes(a.status)&&<Button aria-label={online?'检测':'连接并检测'} loading={busy} onClick={()=>onAction(a,'check')}>{online?'检测':'连接并检测'}</Button>}{['online','rate_limited'].includes(a.status)&&<Button disabled={busy} onClick={()=>onAction(a,'disconnected')}>标记离线</Button>}</Space>}</div>
+  {a&&<><div className={styles.accountDetailHeading}><div><Typography.Title level={4} style={{margin:0}}>{accountName(a)}</Typography.Title><Space><Typography.Text copyable={a.phone?{text:a.phone}:false}>{a.phone??'未获取手机号'}</Typography.Text><StatusTag status={a.status}/></Space></div>{writable&&<Space>{!terminal&&<>{['idle','disconnected','online'].includes(a.status)&&<Button aria-label={online?'检测':'连接并检测'} loading={busy} onClick={()=>onAction(a,'check')}>{online?'检测':'连接并检测'}</Button>}{['online','rate_limited'].includes(a.status)&&<Button disabled={busy} onClick={()=>onAction(a,'disconnected')}>标记离线</Button>}</>}<AccountDeleteButton writable status={a.status} busy={busy||sync.isPending} onClick={()=>onDelete(a)}/></Space>}</div>
   <Tabs activeKey={tab} onChange={setTab} items={[
    {key:'basic',label:'基础信息',children:<Descriptions bordered size="small" column={2} items={[
     {key:'id',label:'账号 ID',children:a.id},{key:'platform',label:'Telegram ID',children:a.platformUserId??'未获取'},

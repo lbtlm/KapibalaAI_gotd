@@ -54,3 +54,9 @@ I18用户名语义补充复用既有verificationSource与列表/详情渲染，�
 
 必要新增为公开来源类型契约和无拦截的真实空系统浏览器验收；复用Playwright启动配置、登录UI、实际API、testInfo输出，默认隔离15173/18080并配置Vite代理。启动器复用主控scripts/local-stack.mjs，不在frontend复制服务管理。当前README替换旧模拟启动指南，历史组件证据标记退役；新测试通过只证明明确覆盖的空系统与权限行为，未覆盖真实故障如实保留未验证。具体命令与red/green见tdd-frontend.md I19。
 I19最终复用既有日志映射增加两条历史数据处理动作的中文显示，无新模块。退出测试定位按现有含图标按钮的可访问名称原位修正；实际空栈两项通过，三个桌面截图保存在本地标准Playwright输出目录，精确自有进程/端口均清理。源码Vite视觉与主控最终production镜像验收分别记录，不混称。
+
+## I21：单账号删除复用（2026-10-15）
+
+Accounts继续集中真实API mutation，复用ApiClient、AccountFeedback、AntD Modal/Button/Tooltip和I20 account-cache。新增AccountDeletion仅承载列表/详情共用的权限/状态按钮与单个有防重锁的确认窗；不把删除塞入A1 transition，不引UI框架/CSS/依赖。removeAccountState复用原缓存模块及失效能力，供本地204与WS account_deleted同用，替代两处独立清理。保留旧业务缓存、原错误码和操作权限。
+
+按用户简化后的Revision8仅同步DELETE，无body/202/pending/CAS/轮询/自动离线；新随机ID隔离由后端负责。纯props/QueryClient测试不构造账号HTTP或网关成功响应；既有真实空系统两用例仅新增不存在ID的幂等与viewer拒绝边界，等待主控schema9交接，不把空系统通过称为真实账号删除验收。来源沿用本仓库现有组件，无外部代码复制。

@@ -19,7 +19,11 @@ async function login(page:Page,username:'admin'|'viewer'){
 test('真实空系统登录后引导上传真实账号，桌面账号工作区填满可用宽度',async({page},testInfo)=>{
  const errors:string[]=[]
  page.on('pageerror',error=>errors.push(error.message))
- await login(page,'admin')
+ const session=await login(page,'admin')
+ for(let attempt=0;attempt<2;attempt++){
+  const deleted=await page.request.delete('/api/accounts/absent-for-deletion-check',{headers:{Authorization:'Bearer '+session.accessToken}})
+  expect(deleted.status()).toBe(204)
+ }
  await expect(page.getByText('上传真实账号的同名 .session 和 .json 文件以导入账号。',{exact:true})).toBeVisible()
  await expect(page.getByRole('button',{name:'上传账号',exact:true})).toBeVisible()
  await expect(page.getByRole('button',{name:'管理分组',exact:true})).toBeVisible()
@@ -41,10 +45,13 @@ test('真实空系统登录后引导上传真实账号，桌面账号工作区�
 
 test('真实空系统viewer只有读取入口，实际导入API拒绝写入',async({page})=>{
  const session=await login(page,'viewer')
- for(const name of ['上传账号','管理分组','连接并检测','检测','移动到分组'])await expect(page.getByRole('button',{name,exact:true})).toHaveCount(0)
+ for(const name of ['上传账号','管理分组','连接并检测','检测','移动到分组','删除账号'])await expect(page.getByRole('button',{name,exact:true})).toHaveCount(0)
  const denied=await page.request.post('/api/accounts/import',{headers:{Authorization:'Bearer '+session.accessToken}})
  expect(denied.status()).toBe(403)
  expect((await denied.json()).error.code).toBe('FORBIDDEN')
+ const deletionDenied=await page.request.delete('/api/accounts/absent-for-deletion-check',{headers:{Authorization:'Bearer '+session.accessToken}})
+ expect(deletionDenied.status()).toBe(403)
+ expect((await deletionDenied.json()).error.code).toBe('FORBIDDEN')
  await page.getByRole('button',{name:/退出登录/}).click()
  await expect(page.getByRole('button',{name:'登录',exact:true})).toBeVisible()
 })

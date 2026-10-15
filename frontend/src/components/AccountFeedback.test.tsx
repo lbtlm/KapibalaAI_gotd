@@ -12,3 +12,14 @@ test.each([
  expect(screen.getByText(message)).toBeInTheDocument()
  expect(screen.getByText(code,{exact:false})).toBeInTheDocument()
 })
+
+test.each([
+ ['ACCOUNT_IN_USE','managed_group','账号仍关联未退出的托管群组，暂时无法删除'],
+ ['ACCOUNT_DELETE_INCOMPLETE',undefined,'删除尚未完成，请重试删除'],
+ ['ACCOUNT_RETIRED',undefined,'账号已移除，请重试删除以完成本系统清理'],
+ ['NETWORK_TIMEOUT',undefined,'请求超时，请稍后重试']
+])('删除错误%s保留具体码并说明后续操作',(code,reason,message)=>{
+ render(<AccountErrorNotice error={new ApiError(409,code,code,{reason})}/>)
+ expect(screen.getByText(message)).toBeInTheDocument()
+ expect(screen.getByText(code,{exact:false})).toBeInTheDocument()
+})
