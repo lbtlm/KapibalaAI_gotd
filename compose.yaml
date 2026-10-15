@@ -84,6 +84,10 @@ services:
       AGENT_URL: http://agent:8082
       BIND_HOST: 0.0.0.0
       PORT: 8080
+      MEDIA_DIR: /app/media
+      MEDIA_RETENTION_DAYS: ${MEDIA_RETENTION_DAYS:-30}
+    volumes:
+      - media-data:/app/media
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -105,3 +109,4 @@ services:
 
 volumes:
   postgres-data:
+  media-data:

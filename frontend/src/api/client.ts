@@ -59,26 +59,29 @@ export class ApiClient {
       if (generation === this.sessionGeneration) this.setSession(null)
     }
   }
-  async request<T>(url: string, method = 'GET', data?: unknown, authenticated = true, retry = true): Promise<T> {
+  async request<T>(url: string, method = 'GET', data?: unknown, authenticated = true, retry = true, responseType: 'json' | 'blob' = 'json'): Promise<T> {
     const generation = this.sessionGeneration
     const sentToken = this.session?.accessToken
     try {
       // A disconnected account check includes connection startup and profile retrieval.
       const timeout = method === 'POST' && ['/api/sequences/generate','/api/agent/reply-preview'].includes(url) ? 75000 : method === 'POST' && (url === '/api/groups/import' || /^\/api\/accounts\/[^/]+\/(check|connect)$/.test(url)) ? 60000 : 15000
-      const send = () => this.instance.request<T>({ url, method, data, timeout, headers: authenticated && sentToken ? { Authorization: 'Bearer ' + sentToken } : {} })
+      const send = () => this.instance.request<T>({ url, method, data, timeout, responseType, headers: authenticated && sentToken ? { Authorization: 'Bearer ' + sentToken } : {} })
       const changesCookie = method === 'POST' && ['/api/auth/login', '/api/auth/refresh', '/api/auth/logout'].includes(url)
       const response = await (changesCookie ? this.cookieRequest(generation, send) : send())
+      if(responseType==='blob') this.assertGeneration(generation)
       return response.data
     } catch (error) {
       if (error instanceof ApiError) throw error
       const e = error as AxiosError<{ error?: Record<string, unknown> }>
-      const detail = e.response?.data?.error ?? {}
+      let body = e.response?.data
+      if(body instanceof Blob){try{body=JSON.parse(await body.text())}catch{body=undefined}}
+      const detail = body?.error ?? {}
       const webAuthFailure = isWebAuthFailure(e.response?.status, detail.code)
       if (webAuthFailure && authenticated) this.assertGeneration(generation)
       if (webAuthFailure && authenticated && retry) {
         if (sentToken === this.session?.accessToken || !this.session) await this.refresh()
         this.assertGeneration(generation)
-        return this.request<T>(url, method, data, authenticated, false)
+        return this.request<T>(url, method, data, authenticated, false, responseType)
       }
       if (webAuthFailure && authenticated) this.setSession(null)
       throw new ApiError(e.response?.status ?? 0, String(detail.code ?? 'NETWORK_ERROR'), String(detail.message ?? '请求失败，请稍后重试'), detail)

@@ -11,6 +11,7 @@ tmp
 **/test-results
 **/playwright-report
 **/coverage
+**/media
 **/bin
 **/*.session
 **/*.pem

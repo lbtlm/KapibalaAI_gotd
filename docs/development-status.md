@@ -1,5 +1,7 @@
 # Development status
 
+> **C1/C3 更新（2026-10-15 晚间）**：本次已补媒体下载/展示/保留清理，并新增只读已有群 C3（实际通过）。历史未实现/模拟 C3 记录以 [当前接口与流程覆盖表](api-flow-coverage.md) 和 R32 TDD 为准。
+
 > **当前范围覆盖历史记录（2026-10-15，账号巡检 Revision 5）：** 用户明确要求移除账号/网关模拟模块及相关测试替身。历史 fake/C3/故障注入通过记录仅证明原版本，不再是当前覆盖。新库为空、正常上传 Session+JSON、真实连接检测与同步群；当前验证以 [账号巡检记录](account-inspection-20261015.md) 及组件 TDD 的 N19/O19/I19 结果为准。删除的测试不计通过，未重新实测的外部失败与恢复场景保持未验证。
 
 Observed 2026-10-15 01:34 Asia/Shanghai. Coordination record; acceptance boundaries are recorded in the acceptance matrix. Final commit-level automation is authoritative in the delivery PR's latest CI Gate.

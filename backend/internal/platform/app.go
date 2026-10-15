@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lbtlm/KapibalaAI_gotd/backend/internal/migration"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,8 @@ import (
 type Config struct {
 	DatabaseURL, GatewayURL, AgentURL string
 	TurnTimeout                       time.Duration
+	MediaDir                          string
+	MediaRetention                    time.Duration
 }
 type App struct {
 	pool    *pgxpool.Pool
@@ -63,6 +66,16 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	if cfg.TurnTimeout == 0 {
 		cfg.TurnTimeout = 12 * time.Second
 	}
+	if cfg.MediaDir == "" {
+		cfg.MediaDir = "media"
+	}
+	if cfg.MediaRetention <= 0 {
+		cfg.MediaRetention = 30 * 24 * time.Hour
+	}
+	if e = os.MkdirAll(cfg.MediaDir, 0700); e != nil {
+		p.Close()
+		return nil, e
+	}
 	var scope string
 	if e = p.QueryRow(ctx, `SELECT current_schema()`).Scan(&scope); e != nil {
 		p.Close()
@@ -83,7 +96,8 @@ func (a *App) Start(ctx context.Context) error {
 		a.cancel()
 		return e
 	}
-	a.wg.Add(8)
+	a.wg.Add(9)
+	go a.loop(ctx, time.Second, a.mediaTick)
 	go a.watchRuntime(ctx)
 	go a.eventsStream(ctx)
 	go a.loop(ctx, 100*time.Millisecond, a.inboxTick)
@@ -186,6 +200,8 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /ws", a.ws)
 	m.HandleFunc("POST /api/groups/{id}/send", a.wrap(a.send, false))
 	m.HandleFunc("GET /api/groups/{id}/messages", a.wrap(a.messages, false))
+	m.HandleFunc("GET /api/media/{id}", a.wrap(a.mediaGet, false))
+	m.HandleFunc("POST /api/media/{id}/retry", a.wrap(a.mediaRetry, false))
 	m.HandleFunc("POST /api/sequences", a.wrap(a.createSequence, false))
 	m.HandleFunc("POST /api/sequences/generate", a.wrap(a.generateSequence, false))
 	m.HandleFunc("PUT /api/sequences/{id}", a.wrap(a.createSequence, false))

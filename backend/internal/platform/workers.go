@@ -13,10 +13,10 @@ import (
 func (a *App) launchWorker(ctx context.Context, key string, fn func(context.Context) error) {
 	a.workMu.Lock()
 	// Reserve send capacity even when agents are waiting for send receipts.
-	// At most 12 workers use lease + business connections in the 32-slot pool.
+	// At most 14 workers (including two media transfers) use lease + business connections in the 32-slot pool.
 	kind, _, _ := strings.Cut(key, ":")
 	limit := 4
-	if kind == "job" || kind == "sequence" {
+	if kind == "job" || kind == "sequence" || kind == "media" {
 		limit = 2
 	}
 	count := 0
@@ -41,8 +41,8 @@ func (a *App) launchWorker(ctx context.Context, key string, fn func(context.Cont
 	}()
 }
 
-func (a *App) ids(ctx context.Context, query string) []string {
-	rows, e := a.pool.Query(ctx, query)
+func (a *App) ids(ctx context.Context, query string, args ...any) []string {
+	rows, e := a.pool.Query(ctx, query, args...)
 	if e != nil {
 		return nil
 	}

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"time"
 )
 
@@ -16,6 +17,15 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	cfg := platform.Config{DatabaseURL: os.Getenv("DATABASE_URL"), GatewayURL: os.Getenv("GATEWAY_URL"), AgentURL: os.Getenv("AGENT_URL")}
+	cfg.MediaDir = os.Getenv("MEDIA_DIR")
+	if raw := os.Getenv("MEDIA_RETENTION_DAYS"); raw != "" {
+		days, e := strconv.Atoi(raw)
+		if e != nil || days < 1 || days > 3650 {
+			slog.Error("MEDIA_RETENTION_DAYS must be 1..3650")
+			os.Exit(1)
+		}
+		cfg.MediaRetention = time.Duration(days) * 24 * time.Hour
+	}
 	if cfg.DatabaseURL == "" {
 		slog.Error("DATABASE_URL is required")
 		os.Exit(1)

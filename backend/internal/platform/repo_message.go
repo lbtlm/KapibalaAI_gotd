@@ -15,6 +15,15 @@ import (
 )
 
 type Message struct {
+	MediaID              *string   `json:"mediaId"`
+	MediaURL             *string   `json:"mediaUrl"`
+	MediaKind            *string   `json:"mediaKind"`
+	MediaMime            *string   `json:"mediaMime"`
+	MediaName            *string   `json:"mediaName"`
+	MediaSize            *int64    `json:"mediaSize"`
+	MediaStatus          *string   `json:"mediaStatus"`
+	MediaError           *string   `json:"mediaError"`
+	LocalFilePath        *string   `json:"localFilePath"`
 	MsgID                *string   `json:"msgId"`
 	ClientMsgID          *string   `json:"clientMsgId"`
 	SenderPlatformUserID string    `json:"senderPlatformUserId"`
@@ -153,7 +162,13 @@ func (a *App) messages(w http.ResponseWriter, r *http.Request) error {
 		s := snapshot + ":" + strconv.Itoa(end)
 		next = &s
 	}
-	respond(w, 200, map[string]any{"items": items[offset:end], "nextCursor": next})
+	page := items[offset:end]
+	// Cursors freeze ordering, not file availability. Never return a stale path
+	// from a snapshot after the retention worker has removed its attachment.
+	if e := a.populateMedia(ctx, r.PathValue("id"), page); e != nil {
+		return e
+	}
+	respond(w, 200, map[string]any{"items": page, "nextCursor": next})
 	return nil
 }
 func (a *App) sendTick(ctx context.Context) {

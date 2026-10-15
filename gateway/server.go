@@ -128,7 +128,7 @@ func New(parent context.Context, c Config) (*Service, error) {
 	s.mux.HandleFunc("GET /groups/{groupId}/recovery", s.recoveryHTTP)
 	s.mux.HandleFunc("GET /groups/{groupId}/messages/by-client-id/{clientMsgId}", s.queryHTTP)
 	s.mux.HandleFunc("GET /events", s.eventsHTTP)
-	s.mux.HandleFunc("GET /media/{id}", func(w http.ResponseWriter, r *http.Request) { fail(w, &APIError{404, "MEDIA_EXPIRED", 0}) })
+	s.mux.HandleFunc("GET /media/{id}", c.Telegram.mediaHTTP)
 	c.Telegram.Resume(s)
 	s.wg.Add(1)
 	go s.runSendRecovery(c.Telegram)

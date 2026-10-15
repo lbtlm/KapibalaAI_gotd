@@ -153,7 +153,12 @@ func (a *TelegramAdapter) platformMessage(aid string, mc tg.MessageClass) {
 	} else if m.Out {
 		sender = s.state.Accounts[aid].PlatformID
 	}
-	s.emit("message", map[string]any{"groupId": gid, "msgId": msgID, "senderPlatformUserId": sender, "text": m.Message, "sentAt": sentAt})
+	data := map[string]any{"groupId": gid, "msgId": msgID, "senderPlatformUserId": sender, "text": m.Message, "sentAt": sentAt}
+	if media := messageMedia(m); media != nil {
+		data["mediaUrl"] = "/media/" + gid + "_" + msgID
+		data["mediaKind"], data["mediaMime"], data["mediaName"], data["mediaSize"] = media.Kind, media.Mime, media.Name, media.Size
+	}
+	s.emit("message", data)
 }
 func (a *TelegramAdapter) finalizeEffect(e *effect, msgID string, sentAt time.Time) {
 	s := a.service

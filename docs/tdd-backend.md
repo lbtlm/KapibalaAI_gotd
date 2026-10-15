@@ -278,3 +278,12 @@ R29 现场只读结果：后端部署后发现Gateway已于21:24正常退出（�
 Red：原导入直接查询网关成员，未核验账号/缓存，离线账号请求在网关不可达时返回500。Green：先以稳定顺序 NOWAIT 锁定所选账号、校验在线身份和主账号同步快照，明确拒绝普通群/缺失快照/重复导入，再调用网关显式登记接口并读取真实成员。名称与用户名来自网关；成员写入仍在同一原事务。实际网络失败不会创建业务群，错误码保留。Agent详情只增 createdAt 读取，复用已有步骤和完整结果。
 
 隔离实际 PostgreSQL 的导入前置失败/不可达回归与Agent全文读取回归通过（含race）；没有伪造网关导入成功，也未使用真实账号进行新导入。真实同步、私有群/公开群导入成功仍需用户验收。
+
+
+## R32 C1 媒体持久化与生命周期
+
+Red: `TestMediaEventSurvivesIngestionWithoutBlockingText` 在真实PG中导入持久协议输入后，messages响应丢失mediaUrl/kind/status。Green: 媒体入库及后续文本不阻塞、HTTP真实文件字节、匿名拒绝/viewer读取、重试、30天清理、运行中Agent保留、deleting恢复、旧游标不引用已删文件、外域/路径/重定向/超限拒绝通过。文件字节服务不是Telegram操作替身，不模拟connect/send成功。
+
+定向 `go test -race ./internal/platform -run Test(Media|RepeatedMigration|ServerExecutable) -count=1` 通过，vet通过；schema12重复迁移不重置数据，旧schema11启动被拒绝。主控按用户要求独立复核群行锁与Agent创建互斥、先清引用后删除、恢复重试和认证边界。
+
+R32现场只读验证：schema12迁移完成，当前Telegram群历史TGS贴纸（8244字节）和MP4（169847字节）真实下载成功；随后同群新收到的MP4也完成下载。浏览器TGS生成SVG动画，两个视频均解码为720×540、时长约1.84秒；1366×900、800×768、640×768无外层滚动溢出，pageerror=0、业务写请求=0。C3更新后再次1 passed。现场内容/截图只在ignored ui-r32，不进入Git。

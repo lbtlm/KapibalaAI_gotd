@@ -53,11 +53,11 @@ func TestServerExecutableRefusesPreviousSchemaWithoutListening(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer pool.Close()
-	down, e := os.ReadFile(filepath.Join("..", "migration", "sql", "010_group_workspace.down.sql"))
+	down, e := os.ReadFile(filepath.Join("..", "migration", "sql", "012_message_media.down.sql"))
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = pool.Exec(context.Background(), string(down)+`; UPDATE schema_migrations SET version=9,dirty=false`); e != nil {
+	if _, e = pool.Exec(context.Background(), string(down)+`; UPDATE schema_migrations SET version=11,dirty=false`); e != nil {
 		t.Fatal(e)
 	}
 	binary := filepath.Join(t.TempDir(), "backend-startup.exe")
@@ -71,7 +71,7 @@ func TestServerExecutableRefusesPreviousSchemaWithoutListening(t *testing.T) {
 	cmd := exec.CommandContext(ctx, binary)
 	cmd.Env = append(os.Environ(), "DATABASE_URL="+cfg.DatabaseURL, "PORT=0")
 	out, e := cmd.CombinedOutput()
-	if e == nil || ctx.Err() != nil || !strings.Contains(string(out), "backend startup refused") || !strings.Contains(string(out), "current=9 required=10") || strings.Contains(string(out), "backend listening") {
+	if e == nil || ctx.Err() != nil || !strings.Contains(string(out), "backend startup refused") || !strings.Contains(string(out), "current=11 required=12") || strings.Contains(string(out), "backend listening") {
 		t.Fatalf("stale server did not promptly refuse startup: %v %s", e, out)
 	}
 }

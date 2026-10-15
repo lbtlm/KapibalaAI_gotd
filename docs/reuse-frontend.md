@@ -60,3 +60,6 @@ I19最终复用既有日志映射增加两条历史数据处理动作的中文�
 Accounts继续集中真实API mutation，复用ApiClient、AccountFeedback、AntD Modal/Button/Tooltip和I20 account-cache。新增AccountDeletion仅承载列表/详情共用的权限/状态按钮与单个有防重锁的确认窗；不把删除塞入A1 transition，不引UI框架/CSS/依赖。removeAccountState复用原缓存模块及失效能力，供本地204与WS account_deleted同用，替代两处独立清理。保留旧业务缓存、原错误码和操作权限。
 
 按用户简化后的Revision8仅同步DELETE，无body/202/pending/CAS/轮询/自动离线；新随机ID隔离由后端负责。纯props/QueryClient测试不构造账号HTTP或网关成功响应；既有真实空系统两用例仅新增不存在ID的幂等与viewer拒绝边界，等待主控schema9交接，不把空系统通过称为真实账号删除验收。来源沿用本仓库现有组件，无外部代码复制。
+
+
+R32 C1: adapted `go_tg_assistant@1d7ca2240ec8c41650c27b4c7965baf84cf36a35/frontend/src/views/weba/components/MessagePanel/StickerMessage.tsx`: visible-only loading, Blob URL cleanup, WebP/WebM/TGS split, lottie-web 5.13.0. Uses native gzip decompression with a size cap and expression-free Lottie, rejects external assets. Reuses ApiClient Bearer refresh, QueryClient invalidation and existing chat styling; no separate media auth system.

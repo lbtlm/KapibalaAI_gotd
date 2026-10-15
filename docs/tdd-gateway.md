@@ -314,3 +314,10 @@ R30 容器恢复实测：全新空账号 Gateway 与专用隔离库，主动终�
 Red：原 POST /groups/import 仅接受 username，有效 tg-ID 在账号验证之前直接400。Green：扩展现有导入路径支持 groupId，通过指定账号的 fenced gotd dialogs 查询目标（包含无username的私有超级群），复用 participants/applyMembers；所有选择账号核验完成后再安装群状态，失败不留下半个新群。保留 username 入口，不加入群、不设置管理员、不发送消息。请求继承现有 operationContext 租约隔离。
 
 空账号真实网关+隔离 PostgreSQL：有效群ID到达账号校验并返回404，非法ID返回400；普通和race执行通过，go vet通过。未建立真实 Telegram 连接，不把边界检查当作真实导入成功验收。
+
+
+## R32 C1 媒体更新与下载
+
+Red: `TestIncomingStickerRetainsMediaInEvent` 实际转换纯 Telegram 更新后仅有空text，mediaUrl/kind/MIME丢失。Green: 同一测试和 `TestMediaFormatsPreserveFileLocation`（race）通过，保留photo最大尺寸、文件位置、WebP/TGS/WebM贴纸类型；下载复用已有账号并按DC取文件，原固定404处理被替换。纯输入转换不伪造平台RPC成功。主控独立检查锁释放、取消与无登录行为。
+
+R32现场只读验证：schema12迁移完成，当前Telegram群历史TGS贴纸（8244字节）和MP4（169847字节）真实下载成功；随后同群新收到的MP4也完成下载。浏览器TGS生成SVG动画，两个视频均解码为720×540、时长约1.84秒；1366×900、800×768、640×768无外层滚动溢出，pageerror=0、业务写请求=0。C3更新后再次1 passed。现场内容/截图只在ignored ui-r32，不进入Git。

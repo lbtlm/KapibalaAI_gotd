@@ -56,3 +56,6 @@ O21R reuses deletion's account row lock in the existing leaveAll admission trans
 
 
 R26 import profile extraction follows go_follow_live@00eb35a56ad1f4bf382e6e3906d35bacd1740376 `backend/internal/tg/telethon.go` profile-field and phone normalization semantics, adapted inside the existing `account_import.go` parser. It adds filename fallback and field aliases while retaining credential validation, persistence and Telegram verification ownership. No credential-printing reference code, raw metadata storage, alternate importer or manager was copied.
+
+
+R32 C1: reused existing App worker leases, SSE reducer, message table, websocket invalidation and auth wrapper. Referenced `go_tg_assistant@1d7ca2240ec8c41650c27b4c7965baf84cf36a35/backend/internal/api/handler/chatroom/chat_media_handler.go` for MIME-aware cached file serving. This app keeps private authenticated media instead of copying public-cache semantics. A new durable download/cleanup path is necessary because the previous media endpoint was a fixed404 and no file queue existed.

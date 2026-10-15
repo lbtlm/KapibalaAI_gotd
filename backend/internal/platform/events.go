@@ -159,6 +159,12 @@ func (a *App) processEvent(ctx context.Context, id int64) error {
 		if err != nil {
 			return err
 		}
+		if str("mediaUrl") != "" {
+			_, e = tx.Exec(ctx, `UPDATE messages SET media_url=$3,media_kind=$4,media_mime=$5,media_name=$6,media_status='pending' WHERE group_id=$1 AND msg_id=$2 AND media_url IS NULL`, groupID, str("msgId"), str("mediaUrl"), str("mediaKind"), str("mediaMime"), str("mediaName"))
+			if e != nil {
+				return e
+			}
+		}
 		if tag.RowsAffected() > 0 {
 			if e = emit(ctx, tx, "message", map[string]any{"groupId": groupID, "msgId": str("msgId"), "isOwn": own}); e != nil {
 				return e

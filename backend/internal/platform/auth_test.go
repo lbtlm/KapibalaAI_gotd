@@ -46,6 +46,9 @@ func fixtureConfig(t *testing.T, configs ...platform.Config) (*platform.App, *ht
 		cfg = configs[0]
 	}
 	cfg.DatabaseURL = scoped
+	if cfg.MediaDir == "" {
+		cfg.MediaDir = t.TempDir()
+	}
 	if cfg.GatewayURL == "" {
 		cfg.GatewayURL = "http://127.0.0.1:0"
 	} // No listener and no gateway substitute.
