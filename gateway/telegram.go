@@ -19,6 +19,8 @@ import (
 
 type onlineSession struct {
 	intentionalStop bool
+	ready           bool
+	attemptContext  context.Context
 	connectionID    string
 	client          *telegram.Client
 	api             *tg.Client
@@ -101,7 +103,10 @@ func (a *TelegramAdapter) Resume(s *Service) {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			pid, err := a.Connect(context.WithValue(s.ctx, connectionIDKey{}, connectionID), id)
+			attemptCtx, finish := context.WithCancel(s.ctx)
+			defer finish()
+			started := time.Now()
+			pid, err := a.Connect(context.WithValue(attemptCtx, connectionIDKey{}, connectionID), id)
 			s.mu.Lock()
 			acct := s.state.Accounts[id]
 			if acct == nil || acct.Status != "online" || acct.ConnectionID != connectionID || s.ctx.Err() != nil {
@@ -112,6 +117,7 @@ func (a *TelegramAdapter) Resume(s *Service) {
 				acct.PlatformID = pid
 			} else {
 				e := platformError(err)
+				slog.Warn("Telegram resume failed", "code", e.Code, "elapsedMs", time.Since(started).Milliseconds())
 				switch e.Code {
 				case "ACCOUNT_SUSPENDED":
 					s.terminal(id, "suspended")
@@ -133,9 +139,20 @@ func (a *TelegramAdapter) Resume(s *Service) {
 }
 
 // Connect adapts the source online_manager_lifecycle.go client.Run/Self/updates loop.
-func (a *TelegramAdapter) Connect(ctx context.Context, id string) (string, error) {
+func (a *TelegramAdapter) Connect(ctx context.Context, id string) (pid string, err error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	attempted := a.sessions[id]
+	ownsAttempt := false
+	defer func() {
+		if err != nil && attempted != nil {
+			var done <-chan struct{}
+			if ownsAttempt {
+				done = attempted.done
+			}
+			err = &connectionAttemptError{err: err, done: done}
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -152,9 +169,13 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (string, error
 				return "", &APIError{409, "CONNECTION_ENDED", 0}
 			}
 			delete(a.sessions, id)
+			attempted = nil
 		} else if cid != "" && s.connectionID != cid {
 			return "", &APIError{409, "CONNECTION_CONFLICT", 0}
 		} else {
+			if !s.ready {
+				return "", &APIError{409, "ACCOUNT_IN_USE", 0}
+			}
 			return stringID(s.self.ID), nil
 		}
 	}
@@ -170,7 +191,12 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (string, error
 	var manager *updates.Manager
 	client := telegram.NewClient(c.APIID, c.APIHash, telegram.Options{SessionStorage: storage, UpdateHandler: telegram.UpdateHandlerFunc(func(ctx context.Context, u tg.UpdatesClass) error { return manager.Handle(ctx, u) }), MigrationTimeout: 120 * time.Second, Device: telegram.DeviceConfig{DeviceModel: c.DeviceModel, SystemVersion: c.SystemVersion, AppVersion: c.AppVersion, LangCode: "en", SystemLangCode: "en-US"}})
 	cid, _ := ctx.Value(connectionIDKey{}).(string)
-	s := &onlineSession{connectionID: cid, client: client, api: a.fencedClient(tg.NewClient(client)), cancel: cancel, done: make(chan struct{})}
+	s := &onlineSession{connectionID: cid, attemptContext: ctx, client: client, api: a.fencedClient(tg.NewClient(client)), cancel: cancel, done: make(chan struct{})}
+	attempted = s
+	ownsAttempt = true
+	// Retain starting/failed clients until Run has actually exited. Deletion and
+	// shutdown must not mistake a startup timeout for a fully stopped client.
+	a.sessions[id] = s
 	pipeline := a.Updates(id, s.api, cancel)
 	manager = updates.New(updates.Config{Handler: pipeline.Handler, Storage: pipeline.Storage, AccessHasher: pipeline.AccessHasher, OnChannelTooLong: pipeline.OnChannelTooLong})
 	ready := make(chan error, 1)
@@ -195,7 +221,10 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (string, error
 			slog.Warn("Telegram connection ended", "accountId", id, "code", platformError(err).Error())
 		}
 		if a.service != nil {
-			go a.connectionEnded(id, s, err)
+			go func() {
+				<-s.done
+				a.connectionEnded(id, s, err)
+			}()
 		}
 	}()
 	connectCtx, connectCancel := context.WithTimeout(ctx, 30*time.Second)
@@ -210,7 +239,7 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (string, error
 			cancel()
 			return "", platformError(err)
 		}
-		a.sessions[id] = s
+		s.ready = true
 		return stringID(s.self.ID), nil
 	case <-connectCtx.Done():
 		cancel()
@@ -258,7 +287,7 @@ func (a *TelegramAdapter) online(id string) (*onlineSession, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	s := a.sessions[id]
-	if s == nil {
+	if s == nil || !s.ready {
 		return nil, &APIError{409, "ACCOUNT_OFFLINE", 0}
 	}
 	select {
@@ -272,6 +301,26 @@ func (a *TelegramAdapter) connectionEnded(id string, old *onlineSession, err err
 	a.mu.Lock()
 	if a.sessions[id] != old || old.intentionalStop {
 		a.mu.Unlock()
+		return
+	}
+	if !old.ready {
+		a.mu.Unlock()
+		// The HTTP/Resume result must finish classification and persistence before
+		// cleanup can end its CID. Otherwise cleanup masks the original error.
+		context.AfterFunc(old.attemptContext, func() {
+			a.mu.Lock()
+			current := a.sessions[id] == old && !old.intentionalStop
+			a.mu.Unlock()
+			if !current {
+				return
+			}
+			s := a.service
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if err := s.persistFailedConnection(id, old.connectionID); err != nil {
+				s.cancel()
+			}
+		})
 		return
 	}
 	a.mu.Unlock()

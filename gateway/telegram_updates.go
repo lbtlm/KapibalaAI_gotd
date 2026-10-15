@@ -12,6 +12,9 @@ func (a *TelegramAdapter) handleUpdates(aid string, u tg.UpdatesClass) {
 		return
 	}
 	s := a.service
+	if s.state.Accounts[aid] == nil {
+		return
+	}
 	for _, chat := range updateChats(u) {
 		if ch, ok := chat.(*tg.Channel); ok {
 			if g := s.state.Groups["tg-"+stringID(ch.ID)]; g != nil {
@@ -79,6 +82,9 @@ func (a *TelegramAdapter) handleUpdates(aid string, u tg.UpdatesClass) {
 				s.emit("member_left", map[string]any{"groupId": gid, "platformUserId": pid})
 			}
 		}
+	}
+	for _, g := range s.state.Groups {
+		g.confirmObservedJoins(s.state.Accounts)
 	}
 }
 func (a *TelegramAdapter) platformMessage(aid string, mc tg.MessageClass) {

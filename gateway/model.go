@@ -28,6 +28,7 @@ type group struct {
 	HistoryThrough         map[string]int    `json:"historyThrough"`
 	VerifiedHistoryThrough map[string]int    `json:"verifiedHistoryThrough,omitempty"`
 	Recovery               *HistoryRecovery  `json:"recovery,omitempty"`
+	LeftAccounts           map[string]bool   `json:"leftAccounts,omitempty"`
 }
 
 // HistoryRecovery describes a proven channel-ID range and any visible limitations.

@@ -75,6 +75,13 @@ func (p *PostgresStore) RegisterAccount(ctx context.Context, c AccountConfig, da
 		return err
 	}
 	defer tx.Rollback()
+	var retired bool
+	if err = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM gateway_retired_accounts WHERE account_id=$1)", c.ID).Scan(&retired); err != nil {
+		return err
+	}
+	if retired {
+		return &APIError{409, "ACCOUNT_RETIRED", 0}
+	}
 	var id, authorization, configuration string
 	err = tx.QueryRowContext(ctx, "SELECT account_id,authorization_fingerprint,configuration_fingerprint FROM gateway_account_configs WHERE account_id=$1 OR authorization_fingerprint=$2", c.ID, identity.Authorization).Scan(&id, &authorization, &configuration)
 	if err == nil {

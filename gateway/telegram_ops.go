@@ -96,6 +96,7 @@ func (a *TelegramAdapter) Execute(ctx context.Context, op, gid string, in input,
 			return nil, err
 		}
 		a.handleUpdates(aid, upd)
+		g.confirmAccountJoin(aid)
 		return map[string]bool{"accepted": true}, nil
 	}
 	channel := &tg.InputChannel{ChannelID: g.ChannelID, AccessHash: g.AccessHashes[aid]}
@@ -200,6 +201,7 @@ func (a *TelegramAdapter) Execute(ctx context.Context, op, gid string, in input,
 			delete(g.Members, pid)
 			s.emit("member_left", map[string]any{"groupId": gid, "platformUserId": pid})
 		}
+		g.confirmAccountLeave(aid)
 		return map[string]any{}, nil
 	case "send":
 		if in.ClientID == "" || in.Text == "" {
@@ -476,6 +478,7 @@ func (a *TelegramAdapter) applyMembers(gid string, g *group, s *Service, ps []tg
 	}
 	g.Members = members
 	g.MemberRoles = roles
+	g.confirmObservedJoins(s.state.Accounts)
 	sort.Slice(out, func(i, j int) bool { return out[i]["platformUserId"] < out[j]["platformUserId"] })
 	return out
 }

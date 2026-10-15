@@ -86,10 +86,17 @@ func New(parent context.Context, c Config) (*Service, error) {
 	s.state.Mode = c.Mode
 	// Pre-generation online snapshots have no incarnation shared with the backend.
 	// Persist offline before Resume; only a later explicit connect may assign an ID.
-	for _, account := range s.state.Accounts {
+	orphaned := 0
+	for id, account := range s.state.Accounts {
 		if account.Status == "online" && account.ConnectionID == "" {
 			account.Status = "offline"
 		}
+		if s.finishFailedConnection(id, account.ConnectionID) {
+			orphaned++
+		}
+	}
+	if orphaned != 0 {
+		slog.Info("ended orphaned Telegram connection intents", "count", orphaned)
 	}
 	if err = c.Telegram.Bind(s); err != nil {
 		cancel()
@@ -107,6 +114,7 @@ func New(parent context.Context, c Config) (*Service, error) {
 	})
 	s.mux.HandleFunc("POST /accounts/{accountId}/{operation}", s.accountHTTP)
 	s.mux.HandleFunc("POST /accounts/register", s.registerHTTP)
+	s.mux.HandleFunc("DELETE /accounts/{accountId}", s.deleteAccountHTTP)
 	s.mux.HandleFunc("GET /accounts/{accountId}/registration", s.registrationHTTP)
 	s.mux.HandleFunc("POST /accounts/{accountId}/check", s.inspectHTTP)
 	s.mux.HandleFunc("GET /accounts/{accountId}/joined-groups", s.inspectHTTP)
@@ -257,6 +265,10 @@ func (s *Service) accountHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer stop()
+	if err := s.store.CheckAccountRetired(opCtx, id); err != nil {
+		fail(w, err)
+		return
+	}
 	if err := s.accountError(id, false); err != nil {
 		fail(w, err)
 		return
@@ -304,6 +316,12 @@ func (s *Service) accountHTTP(w http.ResponseWriter, r *http.Request) {
 		pid, e := s.cfg.Telegram.Connect(opCtx, id)
 		s.mu.Lock()
 		if err := opCtx.Err(); err != nil {
+			if e != nil && failedConnectionStopped(e) {
+				if cleanupErr := s.persistFailedConnection(id, request.ConnectionID); cleanupErr != nil {
+					fail(w, cleanupErr)
+					return
+				}
+			}
 			fail(w, err)
 			return
 		}
@@ -316,7 +334,11 @@ func (s *Service) accountHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if e != nil {
-			s.commitHTTP(w, r, 0, nil, s.accountFailure(id, e))
+			failure := s.accountFailure(id, e)
+			if failedConnectionStopped(e) {
+				s.finishFailedConnection(id, request.ConnectionID)
+			}
+			s.commitHTTP(w, r, 0, nil, failure)
 			return
 		}
 		a = s.state.Accounts[id]

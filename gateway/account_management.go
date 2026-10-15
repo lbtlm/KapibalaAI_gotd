@@ -2,11 +2,14 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 )
 
 type registerInput struct {
@@ -25,6 +28,50 @@ type registration struct {
 }
 
 type connectionIDKey struct{}
+
+// Only the caller that started Run carries its completion signal. A duplicate
+// caller carries nil: it must not finalize the owner's unclassified result.
+type connectionAttemptError struct {
+	err  error
+	done <-chan struct{}
+}
+
+func (e *connectionAttemptError) Error() string { return e.err.Error() }
+func (e *connectionAttemptError) Unwrap() error { return e.err }
+
+func failedConnectionStopped(err error) bool {
+	var attempt *connectionAttemptError
+	if !errors.As(err, &attempt) {
+		return true // Connect returned before any Run existed.
+	}
+	select {
+	case <-attempt.done:
+		return true
+	default:
+		return false
+	}
+}
+
+// finishFailedConnection preserves A1's idle/offline status while reconciling
+// the shared intent. Call only after the attempt is known to have stopped.
+func (s *Service) finishFailedConnection(id, cid string) bool {
+	a := s.state.Accounts[id]
+	if a == nil || cid == "" || a.ConnectionID != cid || a.Status != "idle" && a.Status != "offline" {
+		return false
+	}
+	s.emit("account_status", map[string]any{"accountId": id, "status": "offline", "connectionId": cid})
+	s.endConnection(a)
+	return true
+}
+
+func (s *Service) persistFailedConnection(id, cid string) error {
+	if s.ctx.Err() != nil || !s.finishFailedConnection(id, cid) {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, 2*time.Second)
+	defer cancel()
+	return s.save(ctx)
+}
 
 func (s *Service) endConnection(a *account) {
 	if a.ConnectionID != "" {
@@ -139,6 +186,10 @@ func (s *Service) registerHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer finish()
+	if err = s.store.CheckAccountRetired(commitCtx, in.AccountID); err != nil {
+		fail(w, err)
+		return
+	}
 	if s.state.Accounts[in.AccountID] == nil {
 		s.state.Accounts[in.AccountID] = &account{Status: "idle"}
 	}

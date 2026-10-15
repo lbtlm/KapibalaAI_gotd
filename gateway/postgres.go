@@ -47,6 +47,7 @@ func OpenPostgres(ctx context.Context, dsn string) (*PostgresStore, error) {
 	for _, query := range []string{
 		`CREATE TABLE IF NOT EXISTS gateway_state (id integer PRIMARY KEY CHECK (id=1), data bytea NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS gateway_sessions (account_id text PRIMARY KEY, data bytea NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS gateway_retired_accounts (account_id text PRIMARY KEY)`,
 		`CREATE TABLE IF NOT EXISTS gateway_account_configs (account_id text PRIMARY KEY, authorization_fingerprint text UNIQUE NOT NULL, configuration_fingerprint text NOT NULL, config bytea NOT NULL)`,
 		`ALTER TABLE gateway_account_configs ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'upload' CHECK (source IN ('upload','manifest'))`,
 		`CREATE TABLE IF NOT EXISTS gateway_update_state (account_id text NOT NULL, user_id bigint NOT NULL, pts integer NOT NULL, qts integer NOT NULL, date integer NOT NULL, seq integer NOT NULL, PRIMARY KEY(account_id,user_id))`,

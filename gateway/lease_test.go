@@ -19,6 +19,7 @@ func TestLostPostgresWriterLeaseFailsClosed(t *testing.T) {
 	}
 	request(t, server, "GET", "/accounts/absent/registration", nil, 503)
 	request(t, server, "GET", "/health", nil, 503)
+	request(t, server, "DELETE", "/accounts/absent", nil, 503)
 	replacement, err := gateway.OpenPostgres(context.Background(), testDSN(t))
 	if err != nil {
 		t.Fatal("replacement writer could not acquire the lost lease")

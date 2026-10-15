@@ -160,7 +160,14 @@ func (d dbSession) LoadSession(ctx context.Context) ([]byte, error) {
 	return b, err
 }
 func (d dbSession) StoreSession(ctx context.Context, b []byte) error {
-	_, err := d.db.ExecContext(ctx, "INSERT INTO gateway_sessions(account_id,data) VALUES($1,$2) ON CONFLICT(account_id) DO UPDATE SET data=EXCLUDED.data", d.id, b)
+	result, err := d.db.ExecContext(ctx, "UPDATE gateway_sessions SET data=$2 WHERE account_id=$1", d.id, b)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err == nil && n != 1 {
+		return session.ErrNotFound
+	}
 	return err
 }
 

@@ -42,7 +42,7 @@ func isolatedStore(t *testing.T) *gateway.PostgresStore {
 		p.Close()
 		t.Fatal("gateway tests require an isolated test/inspection database")
 	}
-	if _, err = p.DB.Exec("TRUNCATE gateway_state,gateway_account_configs,gateway_sessions,gateway_update_state,gateway_channel_state"); err != nil {
+	if _, err = p.DB.Exec("TRUNCATE gateway_state,gateway_account_configs,gateway_sessions,gateway_update_state,gateway_channel_state,gateway_retired_accounts"); err != nil {
 		p.Close()
 		t.Fatal(err)
 	}
