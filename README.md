@@ -22,27 +22,45 @@ Kapibala AI 是一个管理 Telegram 服务账号、群组和消息的操作台�
 
 ## 快速开始
 
-需要 **Docker Engine / Docker Desktop 与 Compose v2**。请先检出待评审分支或已验收提交；当前开发交付在 [PR #5](https://github.com/lbtlm/KapibalaAI_gotd/pull/5)，`main` 不代表最新开发进度。
+需要 **Docker Engine / Docker Desktop（Linux 容器）与 Compose v2**，以及可访问镜像源、构建依赖、Telegram 和模型 API 的网络。本机不必安装 Go、Node.js、pnpm 或 PostgreSQL。新机器先克隆仓库的 `dev` 分支，或检出指定交付提交；[PR #5](https://github.com/lbtlm/KapibalaAI_gotd/pull/5) 已合入 `dev`，`main` 不代表最新开发进度。
 
-在仓库根目录执行，已有 `.env` 会保留：
+以下命令在仓库根目录执行，路径按实际克隆位置替换。统一使用与 `compose.yaml` 同目录的 **根目录 `.env`**，Compose 自动读取，已有配置不会被覆盖：
 
 ```powershell
 Set-Location D:\web_projects\kapibala_ai
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
-# 编辑 .env：将 POSTGRES_PASSWORD 替换为本地随机密码（字母、数字、-、_）。
+```
+
+**先编辑根目录 `.env`，再执行启动命令：**
+
+| 配置 | 如何填写 |
+| --- | --- |
+| `POSTGRES_PASSWORD` | 新数据库使用随机密码，只用字母、数字、`-`、`_`；已有数据库必须保留原密码 |
+| `AGENT_MODE` | 模板使用 `openai`，表示真实模型；无密钥时仅演示页面可明确改为 `scripted`，其回复为固定文案 |
+| `OPENAI_API_KEY` | 填入密钥值，不是密钥文件路径；可将已有 `.local` 私有文件中的值填入此项 |
+| `OPENAI_BASE_URL` / `OPENAI_MODEL` / `OPENAI_API_STYLE` | 选择密钥实际可用的服务地址、模型和协议；模板为 DeepSeek / `deepseek-flash` / `chat_completions` |
+| `CANDIDATE_SHA` / `CONSOLE_PORT` | 新机器本地构建保留 `local`；控制台默认 `5173`，冲突时可修改 |
+
+```powershell
+Set-Location D:\web_projects\kapibala_ai
+docker compose -p kapibala-demo config --quiet
 docker compose -p kapibala-demo build
+# 仅在上面的构建成功后启动；先构建不会停止现有服务。
 docker compose -p kapibala-demo up -d --no-build
+docker compose -p kapibala-demo ps -a
 Invoke-RestMethod http://127.0.0.1:5173/api/health
 ```
 
-打开 [本地控制台](http://127.0.0.1:5173)，使用 `admin / admin` 操作，或使用 `viewer / viewer` 查看。两组账号仅供本地受控演示，后端仍会拒绝 viewer 的业务写入。
+Compose 自动创建业务库与独立网关库、运行迁移并启动全部服务。`migrate` / `gateway-db` 显示 `Exited (0)` 是正常的一次性初始化结果，其余五个服务应为运行状态；健康接口应返回 `ok:true` 和 `schemaVersion:12`。端口变更时同步修改访问 URL。
 
-**首次启动没有 Telegram 账号。** 上传同名 `.session` + `.json` 后，再主动连接并检测；上传本身不登录 Telegram。Compose 只对本机公开控制台端口，数据库和内部服务不直接对外开放。
+打开 [本地控制台](http://127.0.0.1:5173)，使用 `admin / admin` 操作，或使用 `viewer / viewer` 查看。两组账号仅供本地受控演示，后端仍会拒绝 viewer 的业务写入。新机器的数据库为空，不会自动带入旧机器的账号、群、消息或媒体；仅复制配置即可启动新环境，迁移原数据另见 [运维说明](docs/operations.md)。
+
+**密钥放在 `.local` 并不会自动生效。** `.env.example` 只是模板；请将已有私有文件中的模型配置值填入根目录 `.env`，`OPENAI_API_KEY` 填密钥本身，不填路径。应用不扫描 `.local`；`.env` 已被 Git 和镜像构建忽略。具体读取规则见 [启动指南](docs/getting-started.md#配置文件如何读取)。
 
 <details>
-<summary>启用真实 AI、查看日志与停止服务</summary>
+<summary>真实 AI、群内启用条件与修改配置</summary>
 
-默认 `AGENT_MODE=scripted` 是固定协议回复，用于无密钥启动，不代表真实 AI。需要模型生成剧本或回复时，在忽略的 `.env` 中配置：
+真实 AI 在根目录 `.env` 中配置以下项目。`openai` 是兼容 API 的适配模式名，也适用于 DeepSeek：
 
 ```dotenv
 AGENT_MODE=openai
@@ -52,15 +70,31 @@ OPENAI_MODEL=deepseek-flash
 OPENAI_API_KEY=替换为自己的密钥
 ```
 
-修改后执行 `docker compose -p kapibala-demo up -d --no-deps agent`。真实模型配置只进入独立 provider；群内还需绑定在线管理员、启用 Agent，并处于未暂停状态。AI 回复预演只生成预览，不发送群消息。
+`openai` 模式缺少密钥会拒绝启动 Agent，不会回退固定文案；密钥已填写也不等于模型已验证可用。登录后通过“AI 回复预演”检查真实调用，预演不向群发送消息。真实模型配置只进入独立 provider。
+
+群内自动回复还需要：
+
+1. 上传同名 `.session` + `.json`，主动“连接并检测”，再创建或导入群；上传本身不登录 Telegram。
+2. 绑定的管理员在线、仍在该群且有发送权限；Agent 始终使用此管理员。
+3. 打开“Agent 自动响应”，群未暂停、未结束；暂停的群需显式恢复。
+4. 收到新的外部成员消息。剧本、自有账号手动消息和 Agent 回复不触发；恢复营销不补发暂停期间的消息，也不自动重启剧本。
+
+只修改模型模式、密钥、地址或模型时，重建 **agent 容器**以读取配置，无需重编译镜像或重启 gateway：
 
 ```powershell
-docker compose -p kapibala-demo logs --tail 100 backend gateway agent
-# 停止本项目，保留数据库与媒体卷。
-docker compose -p kapibala-demo down
+Set-Location D:\web_projects\kapibala_ai
+docker compose -p kapibala-demo up -d --no-build --no-deps agent
+docker compose -p kapibala-demo logs --tail 100 agent
 ```
 
-不要给保留数据的停止命令加 `--volumes`。已有数据库继续使用原密码；端口冲突可调整 `.env` 中的 `CONSOLE_PORT`，访问地址随之改变。
+**`docker compose restart` 不会加载修改后的环境变量**；使用上面的 `up`。这是 [Docker Compose 的既定行为](https://docs.docker.com/reference/cli/docker/compose/restart/)。端口和媒体保留期变更的命令见 [启动指南](docs/getting-started.md#修改配置后如何生效)。
+
+```powershell
+Set-Location D:\web_projects\kapibala_ai
+docker compose -p kapibala-demo logs --tail 100 backend gateway agent
+# 停止本项目并保留数据库与媒体，不要添加 --volumes。
+docker compose -p kapibala-demo down
+```
 
 </details>
 
@@ -180,7 +214,7 @@ flowchart LR
 
 **Agent 显示“已完成”，是不是停止工作了？** “已完成”指一次消息处理 run。只要群未暂停或结束、Agent 已启用且管理员可用，后续外部消息仍会触发同一群 Agent 的新 run。
 
-**为什么回复还是固定文案？** 先查看群操作区域的运行模式。默认 scripted 不调用模型；真实 AI 需要 provider 的 openai 配置。预演成功只证明生成链路，不代表群内审计和投递已完成。
+**为什么回复还是固定文案？** 先查看群操作区域的运行模式。`scripted` 不调用模型；新版配置模板显式选择 `openai`，但未配置模式时 Compose 仍兼容回退 `scripted`。修改根目录 `.env` 后执行 `docker compose -p kapibala-demo up -d --no-build --no-deps agent`。预演成功只证明生成链路，不代表群内审计和投递已完成。
 
 **剧本延迟从什么时候计算？** 从上一条实际发出的时间开始。请在批次记录中区分“等待执行”“排队中”和“已发出”；网络等待、账号限流与暂停都会影响执行。
 
