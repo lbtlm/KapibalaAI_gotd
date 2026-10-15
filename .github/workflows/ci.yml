@@ -71,6 +71,7 @@ jobs:
     env:
       TEST_DATABASE_URL: postgres://kapibala:ci-only@127.0.0.1:5432/kapibala_test?sslmode=disable
       GATEWAY_TEST_DATABASE_URL: postgres://kapibala:ci-only@127.0.0.1:5432/kapibala_gateway_test?sslmode=disable
+      TEST_ACCOUNT_DELETE_GATEWAY_URL: http://127.0.0.1:18081
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -82,10 +83,29 @@ jobs:
           cache-dependency-path: |
             backend/go.sum
             gateway/go.sum
-      - name: Create the separate gateway test database
+      - name: Create the separate gateway test databases
         env:
           PG_CONTAINER: ${{ job.services.postgres.id }}
-        run: docker exec "$PG_CONTAINER" createdb -U kapibala kapibala_gateway_test
+        run: |
+          docker exec "$PG_CONTAINER" createdb -U kapibala kapibala_gateway_test
+          docker exec "$PG_CONTAINER" createdb -U kapibala kapibala_delete_gateway_test
+      - name: Start the real empty gateway for account deletion integration
+        env:
+          DATABASE_URL: postgres://kapibala:ci-only@127.0.0.1:5432/kapibala_delete_gateway_test?sslmode=disable
+          BIND_HOST: 127.0.0.1
+          PORT: '18081'
+          GATEWAY_MODE: telegram
+        run: |
+          mkdir -p .local
+          (cd gateway && go build -o ../.local/delete-gateway ./cmd/gateway)
+          .local/delete-gateway > .local/delete-gateway.log 2>&1 &
+          echo $! > .local/delete-gateway.pid
+          for attempt in {1..60}; do
+            if curl --fail --silent "$TEST_ACCOUNT_DELETE_GATEWAY_URL/health"; then exit 0; fi
+            sleep 1
+          done
+          cat .local/delete-gateway.log
+          exit 1
       - run: node scripts/go-test.mjs backend
       - run: node scripts/go-test.mjs gateway
       - run: node scripts/go-test.mjs backend -race
@@ -94,6 +114,12 @@ jobs:
         working-directory: backend
       - run: go vet ./...
         working-directory: gateway
+      - name: Stop the owned empty gateway
+        if: always()
+        run: |
+          if [ -f .local/delete-gateway.pid ]; then
+            kill "$(cat .local/delete-gateway.pid)" 2>/dev/null || true
+          fi
 
   frontend:
     name: Frontend unit / types (build on full)
