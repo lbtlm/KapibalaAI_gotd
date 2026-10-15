@@ -70,8 +70,7 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       TEST_DATABASE_URL: postgres://kapibala:ci-only@127.0.0.1:5432/kapibala_test?sslmode=disable
-      GATEWAY_TEST_DATABASE_URL: postgres://kapibala:ci-only@127.0.0.1:5432/kapibala_test?sslmode=disable
-      GATEWAY_INTEGRATION_URL: http://127.0.0.1:18081
+      GATEWAY_TEST_DATABASE_URL: postgres://kapibala:ci-only@127.0.0.1:5432/kapibala_gateway_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -83,21 +82,10 @@ jobs:
           cache-dependency-path: |
             backend/go.sum
             gateway/go.sum
-      - name: Start actual fake gateway on an isolated integration database
-        working-directory: gateway
+      - name: Create the separate gateway test database
         env:
           PG_CONTAINER: ${{ job.services.postgres.id }}
-          DATABASE_URL: postgres://kapibala:ci-only@127.0.0.1:5432/kapibala_gateway_integration?sslmode=disable
-          GATEWAY_MODE: fake
-          GATEWAY_ADMIN_ENABLED: 'false'
-          BIND_HOST: 127.0.0.1
-          PORT: 18081
-        run: |
-          docker exec "$PG_CONTAINER" createdb -U kapibala kapibala_gateway_integration
-          go build -o "$RUNNER_TEMP/gateway-integration" ./cmd/gateway
-          "$RUNNER_TEMP/gateway-integration" > "$RUNNER_TEMP/gateway-integration.log" 2>&1 &
-          echo "$!" > "$RUNNER_TEMP/gateway-integration.pid"
-          curl --fail --retry 60 --retry-delay 1 --retry-connrefused "$GATEWAY_INTEGRATION_URL/health" | jq --exit-status '.mode == "fake" and .status == "ok"'
+        run: docker exec "$PG_CONTAINER" createdb -U kapibala kapibala_gateway_test
       - run: node scripts/go-test.mjs backend
       - run: node scripts/go-test.mjs gateway
       - run: node scripts/go-test.mjs backend -race
@@ -106,18 +94,6 @@ jobs:
         working-directory: backend
       - run: go vet ./...
         working-directory: gateway
-      - name: Stop only this job's integration gateway
-        if: always()
-        run: |
-          if test -f "$RUNNER_TEMP/gateway-integration.pid"; then
-            kill "$(cat "$RUNNER_TEMP/gateway-integration.pid")" || true
-          fi
-      - name: Gateway integration failure diagnostics
-        if: failure()
-        run: |
-          if test -f "$RUNNER_TEMP/gateway-integration.log"; then
-            tail -n 100 "$RUNNER_TEMP/gateway-integration.log"
-          fi
 
   frontend:
     name: Frontend unit / types (build on full)
@@ -145,7 +121,7 @@ jobs:
         working-directory: frontend
 
   e2e:
-    name: Real stack Playwright C3
+    name: Real services empty-account browser
     needs: policy
     if: needs.policy.outputs.mode == 'full'
     runs-on: ubuntu-latest
@@ -163,7 +139,13 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       E2E_DATABASE_URL: postgres://kapibala:ci-only@127.0.0.1:5432/kapibala_e2e?sslmode=disable
-      E2E_STACK_COMMAND: node scripts/fake-stack.mjs
+      E2E_GATEWAY_DATABASE_URL: postgres://kapibala:ci-only@127.0.0.1:5432/kapibala_gateway_e2e?sslmode=disable
+      E2E_STACK_COMMAND: node scripts/local-stack.mjs
+      E2E_BASE_URL: http://127.0.0.1:15173
+      E2E_API_URL: http://127.0.0.1:18080
+      BACKEND_PORT: '18080'
+      GATEWAY_PORT: '18081'
+      AGENT_PORT: '18082'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -184,6 +166,10 @@ jobs:
         working-directory: frontend
       - run: pnpm exec playwright install --with-deps chromium
         working-directory: frontend
+      - name: Create the separate empty gateway database
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: docker exec "$PG_CONTAINER" createdb -U kapibala kapibala_gateway_e2e
       - run: pnpm test:e2e
         working-directory: frontend
       - uses: actions/upload-artifact@v4

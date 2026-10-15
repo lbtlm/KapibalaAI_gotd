@@ -4,7 +4,7 @@ import net from 'node:net';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
-const script = fileURLToPath(new URL('./fake-stack.mjs', import.meta.url));
+const script = fileURLToPath(new URL('./local-stack.mjs', import.meta.url));
 
 test('missing Go exits promptly instead of waiting forever for a never-started child', async () => {
   const ports = [];
@@ -16,7 +16,7 @@ test('missing Go exits promptly instead of waiting forever for a never-started c
   }
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toUpperCase() !== 'PATH'));
   const result = spawnSync(process.execPath, [script], {
-    env: {...env, PATH: '/nonexistent-go-path', E2E_DATABASE_URL: 'postgres://example/isolated_e2e', BACKEND_PORT: ports[0], GATEWAY_PORT: ports[1], AGENT_PORT: ports[2]},
+    env: {...env, PATH: '/nonexistent-go-path', E2E_DATABASE_URL: 'postgres://example/isolated_e2e', E2E_GATEWAY_DATABASE_URL: 'postgres://example/isolated_gateway', BACKEND_PORT: ports[0], GATEWAY_PORT: ports[1], AGENT_PORT: ports[2]},
     encoding:'utf8', timeout:5000,
   });
   assert.equal(result.error, undefined, 'startup failure must not hang');
@@ -30,12 +30,25 @@ test('missing E2E database fails before builds or migrations', () => {
   assert.match(result.stderr, /E2E_DATABASE_URL is required/);
 });
 
+test('missing independent gateway database fails before builds or migrations', () => {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toUpperCase() !== 'PATH'));
+  const result = spawnSync(process.execPath, [script], {env: {...env, PATH: '/nonexistent-go-path', E2E_DATABASE_URL: 'postgres://example/backend', E2E_GATEWAY_DATABASE_URL: ''}, encoding: 'utf8', timeout: 5000});
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /E2E_GATEWAY_DATABASE_URL is required/);
+});
+
+test('one database cannot be reused through different credentials or URL query options', () => {
+  const result = spawnSync(process.execPath, [script], {env: {...process.env, E2E_DATABASE_URL: 'postgres://first@example/backend?sslmode=disable', E2E_GATEWAY_DATABASE_URL: 'postgres://second@example:5432/backend'}, encoding: 'utf8', timeout: 5000});
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /must use separate databases/);
+});
+
 test('occupied service port is refused without stopping the existing listener', async () => {
   const listener = net.createServer();
   await new Promise(resolve => listener.listen(0, '127.0.0.1', resolve));
   try {
     const result = spawnSync(process.execPath, [script], {
-      env: {...process.env, E2E_DATABASE_URL: 'postgres://example/isolated_e2e', BACKEND_PORT: String(listener.address().port)},
+      env: {...process.env, E2E_DATABASE_URL: 'postgres://example/isolated_e2e', E2E_GATEWAY_DATABASE_URL: 'postgres://example/isolated_gateway', BACKEND_PORT: String(listener.address().port)},
       encoding: 'utf8', timeout: 10000,
     });
     assert.equal(result.status, 1);

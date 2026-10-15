@@ -5,9 +5,6 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 
 export function allowedSkip(module,event,env=process.env,compiledOnly=new Set()) {
   if (!event.Test && compiledOnly.has(event.Package)) return true;
-  if (module === 'gateway' && event.Package === 'github.com/lbtlm/KapibalaAI_gotd/gateway' && event.Test === 'TestGatewayCrashChild') {
-    return env.GATEWAY_CRASH_CHILD !== '1';
-  }
   if (module !== 'backend') return false;
   if (event.Package === 'github.com/lbtlm/KapibalaAI_gotd/backend/internal/platform' && event.Test === 'TestServerProcessHelper') {
     return env.KAPIBALA_CHILD_SERVER !== 'true';

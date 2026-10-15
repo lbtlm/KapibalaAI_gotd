@@ -6,7 +6,7 @@ import {fileURLToPath} from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const ports = [process.env.BACKEND_PORT || '8080', process.env.GATEWAY_PORT || '8081', process.env.AGENT_PORT || '8082'];
-const bin = path.join(root, '.local', 'fake-stack', ports.join('-'), 'bin');
+const bin = path.join(root, '.local', 'local-stack', ports.join('-'), 'bin');
 const children = new Set();
 let stopping = false;
 
@@ -59,7 +59,13 @@ async function ready(url) {
 
 try {
   const dsn = process.env.E2E_DATABASE_URL;
-  if (!dsn) throw new Error('E2E_DATABASE_URL is required; use a dedicated fake-stack database');
+  const gatewayDSN = process.env.E2E_GATEWAY_DATABASE_URL;
+  if (!dsn) throw new Error('E2E_DATABASE_URL is required; use a dedicated backend database');
+  if (!gatewayDSN) throw new Error('E2E_GATEWAY_DATABASE_URL is required; use a separate gateway database');
+  const backendDB = new URL(dsn), gatewayDB = new URL(gatewayDSN);
+  if (backendDB.hostname === gatewayDB.hostname && (backendDB.port || '5432') === (gatewayDB.port || '5432') && backendDB.pathname === gatewayDB.pathname) {
+    throw new Error('Backend and gateway must use separate databases');
+  }
   for (const port of ports) await available(port);
   await mkdir(bin, {recursive: true});
   const env = {...process.env, DATABASE_URL: dsn, BIND_HOST: '127.0.0.1'};
@@ -71,13 +77,13 @@ try {
   }
   if (!stopping) {
     await run(path.join(bin, 'migrate' + extension), [], root, env);
-    void run(path.join(bin, 'gateway' + extension), [], root, {...env, PORT: ports[1], GATEWAY_MODE: 'fake', GATEWAY_ADMIN_ENABLED: 'true'}, true);
-    void run(path.join(bin, 'agent' + extension), [], root, {...env, PORT: ports[2], AGENT_MODE: 'scripted', AGENT_ADMIN_ENABLED: 'true', OPENAI_API_KEY: ''}, true);
+    void run(path.join(bin, 'gateway' + extension), [], root, {...env, DATABASE_URL: gatewayDSN, PORT: ports[1], GATEWAY_MODE: 'telegram'}, true);
+    void run(path.join(bin, 'agent' + extension), [], root, {...env, PORT: ports[2], AGENT_MODE: 'scripted', AGENT_ADMIN_ENABLED: 'false', OPENAI_API_KEY: ''}, true);
     await Promise.all([ready(`http://127.0.0.1:${ports[1]}/health`), ready(`http://127.0.0.1:${ports[2]}/health`)]);
     if (!stopping) {
       void run(path.join(bin, 'server' + extension), [], root, {...env, PORT: ports[0], GATEWAY_URL: `http://127.0.0.1:${ports[1]}`, AGENT_URL: `http://127.0.0.1:${ports[2]}`}, true);
       await ready(`http://127.0.0.1:${ports[0]}/api/health`);
-      console.log('Fake stack ready; Ctrl+C stops only its owned service processes.');
+      console.log('Local services ready; accounts are uploaded and verified through Telegram. Ctrl+C stops only owned processes.');
     }
   }
 } catch (error) {

@@ -1,6 +1,10 @@
 # Implementation contract
 
-Revision 7, 2026-10-15 Asia/Shanghai. Owner: current controller. User approved implementation, copying reusable modules then adapting, private repository commits, OpenAI-compatible APIs with DeepSeek for real testing, TDD and CI/CD. The user has authorized completing the planned repairs and explicitly split CI by PR destination: development PRs into dev run lightweight tests without build checks; dev-to-main release PRs run complete tests and builds. Subsequent usability findings will be supplied separately. Do not change repository visibility. PR #1 is merged into dev; the subsequent requirements audit and daytime work are recorded in [the 2026-10-15 daytime work plan](upgrade-plan-2026-10-15.md).
+Revision 8, 2026-10-15 Asia/Shanghai. Owner: current controller. User approved implementation, copying reusable modules then adapting, private repository commits, OpenAI-compatible APIs with DeepSeek for real testing, TDD and CI/CD. The user has authorized completing the planned repairs and explicitly split CI by PR destination: development PRs into dev run lightweight tests without build checks; dev-to-main release PRs run complete tests and builds. Subsequent usability findings will be supplied separately. Do not change repository visibility. PR #1 is merged into dev; the subsequent requirements audit and daytime work are recorded in [the 2026-10-15 daytime work plan](upgrade-plan-2026-10-15.md).
+
+## Account inspection override (2026-10-15)
+
+User explicitly removed account/gateway simulation, including related test doubles. [Account inspection Revision 5](account-inspection-20261015.md) supersedes historical fake-mode requirements and test coverage below. Gateway is Telegram-only, starts empty, and uses durable uploads; old manifests require an explicit offline adoption before startup. Backend and gateway databases are separate. Keep pure logic and actual PostgreSQL tests; no simulated connect/check/group/send success. Retired tests do not count as passed. Provider product behavior and unrelated authentication tests are outside this removal.
 
 ## Sources and precedence
 
@@ -8,7 +12,7 @@ Revision 7, 2026-10-15 Asia/Shanghai. Owner: current controller. User approved i
 
 ## Ownership
 
-- Niko: `gateway/` Go module, all gateway source/tests, gotd adapter, deterministic simulator, gateway README/Dockerfile, `docs/reuse-gateway.md` and `docs/tdd-gateway.md`.
+- Niko: `gateway/` Go module, all gateway source/tests, gotd adapter, durable credential registry, gateway README/Dockerfile, `docs/reuse-gateway.md` and `docs/tdd-gateway.md`.
 - Orion: `backend/` Go module including business API, PostgreSQL migrations, domain workers, agent executor and standalone `cmd/agent` OpenAI/scripted provider; backend tests/README/Dockerfile; `docs/reuse-backend.md` and `docs/tdd-backend.md`.
 - Iris: `frontend/`, UI tests and browser test scaffolding, `docs/reuse-frontend.md`, `docs/tdd-frontend.md` and `docs/ui-design.md`.
 - Rowan: root workflows, scripts, Compose, `.env.example`/`.dockerignore`, README and operations documentation. Existing component Dockerfiles remain with their original authors unless explicitly handed over.
@@ -20,10 +24,10 @@ Each worker is not alone in the codebase. Preserve others' changes; no recursive
 
 - Separate Go modules `github.com/lbtlm/KapibalaAI_gotd/backend` and `github.com/lbtlm/KapibalaAI_gotd/gateway`, Go 1.24 compatible. This isolates large gotd compilation and dependency ownership while HTTP provides the boundary.
 - Backend `go run ./cmd/migrate` applies migrations explicitly; `go run ./cmd/server` checks schema and refuses stale databases. PORT default 8080, DATABASE_URL, GATEWAY_URL default http://127.0.0.1:8081, AGENT_URL default http://127.0.0.1:8082.
-- Gateway `go run ./cmd/gateway`, PORT default 8081, GATEWAY_MODE=fake|telegram, DATABASE_URL. Persist gateway event log independently from application tables (prefix gateway_ or own schema). Fake mode requires no Telegram credentials. Accounts seed IDs account-1/account-2/account-3, stable platform IDs in fake. Gateway implements exact section 2.1 including SSE history and query-by-client-id; simulator control endpoints must be explicitly enabled and unavailable by default in real mode.
+- Gateway `go run ./cmd/gateway`, PORT default 8081, GATEWAY_MODE=telegram (also the default), DATABASE_URL in a separate database. Empty databases contain no accounts. Upload Session+JSON before explicitly connecting; startup uses the durable registry. Preserve section 2.1 lifecycle, SSE history and query-by-client-id; no simulator endpoints.
 - Standalone Agent service `go run ./cmd/agent`, PORT default 8082, AGENT_MODE=scripted|openai. OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL and OPENAI_API_STYLE=chat_completions|responses only in provider service. DeepSeek test defaults: https://api.deepseek.com and deepseek-flash; user will fill key in ignored local configuration. Use strict function schemas where supported, one tool call per turn, fail closed on audit; preserve provider reasoning/function-call state correctly across turns. No API keys or reasoning content in frontend, fixtures of live content, logs or git.
-- React 18 + TypeScript + Vite, frontend dev port 5173, proxy /api and /ws to backend. Scripts: dev, build, typecheck, test, test:e2e. Browser tests eventually run actual backend+fake gateway+scripted agent+PostgreSQL, not only mocked page APIs.
-- API identifiers are strings. Times ISO8601 UTC or null. Follow endpoint response envelopes from spec (including bare GET /api/accounts array). GET /api/groups uses a bare array of group objects. Backend seed admin/admin, viewer/viewer and 3 idle service accounts. User credentials for demo are documented as demo-only.
+- React 18 + TypeScript + Vite, frontend dev port 5173, proxy /api and /ws to backend. Scripts: dev, build, typecheck, test, test:e2e. Credential-free browser tests run actual backend+empty Telegram gateway+existing provider+PostgreSQL; real account acceptance is separately authorized and recorded.
+- API identifiers are strings. Times ISO8601 UTC or null. Follow endpoint response envelopes from spec (including bare GET /api/accounts array). GET /api/groups uses a bare array of group objects. Backend seeds admin/admin and viewer/viewer; no service accounts. User credentials for demo are documented as demo-only.
 - Login and refresh additionally return role: `{accessToken,role}`; role=admin|viewer. Backend remains permission authority.
 - Additional UI supporting APIs allowed: GET /api/sequences returns array of sequence definitions; POST /api/groups/:id/sequence-runs/preview accepts same input and returns `{steps:[{index,text,resolvedVars,varSources}]}` with identical preflight errors and no effects. GET /api/health remains unauthenticated. Other domain endpoints require auth. Do not assume group IDs match gateway IDs.
 
