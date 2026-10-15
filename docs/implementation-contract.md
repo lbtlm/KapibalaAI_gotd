@@ -1,6 +1,6 @@
 # Implementation contract
 
-Revision 6, 2026-10-15 Asia/Shanghai. Owner: current controller. User approved implementation, copying reusable modules then adapting, private repository commits, OpenAI-compatible APIs with DeepSeek for real testing, TDD, complete testing and CI/CD. The user has now authorized completing the planned repairs; subsequent usability findings will be supplied separately. Do not change repository visibility. PR #1 is merged into dev; the subsequent requirements audit and daytime work are recorded in [the 2026-10-15 daytime work plan](upgrade-plan-2026-10-15.md).
+Revision 7, 2026-10-15 Asia/Shanghai. Owner: current controller. User approved implementation, copying reusable modules then adapting, private repository commits, OpenAI-compatible APIs with DeepSeek for real testing, TDD and CI/CD. The user has authorized completing the planned repairs and explicitly split CI by PR destination: development PRs into dev run lightweight tests without build checks; dev-to-main release PRs run complete tests and builds. Subsequent usability findings will be supplied separately. Do not change repository visibility. PR #1 is merged into dev; the subsequent requirements audit and daytime work are recorded in [the 2026-10-15 daytime work plan](upgrade-plan-2026-10-15.md).
 
 ## Sources and precedence
 
@@ -41,7 +41,7 @@ Do not import source database backups, Sessions, production env, .git or unrelat
 
 ## Delivery and limits
 
-Commit/push to https://github.com/lbtlm/KapibalaAI_gotd is authorized. No visibility change, no production deployment without destination, no tag/public release. CI must execute tests, race/static checks where supported, frontend build and real E2E. CD should build immutable deliverable/container artifacts with checksums and explicit manual promotion/deployment inputs, with no simulated deployment claimed as live.
+Commit/push to https://github.com/lbtlm/KapibalaAI_gotd is authorized. No visibility change, no production deployment without destination, no tag/public release. Development PRs into dev run policy, lightweight Go tests and frontend unit/type checks, without release builds, Docker builds, PostgreSQL/race integration or real-stack E2E. Pure documentation PRs may use the policy-only profile. Dev-to-main release PRs run the complete PostgreSQL/race/static, frontend build, real E2E and immutable container candidate checks, including when the release diff contains only documentation. CI Gate must verify the jobs required by the selected profile and fail on unexpected skipped or failed jobs. Do not duplicate the complete suite on ordinary branch pushes. Explicit manual full verification remains available. CD uses verified immutable candidate artifacts and explicit manual promotion/deployment inputs; neither local Docker validation nor a lightweight PR pass is full release acceptance.
 
 Runtime settings: preserve the controller's user-selected settings; Niko and Orion requested GPT-6.1 Sol/Ultra via explicit worker binding, Iris Sol/High. Native fixed profiles cannot silently replace these. Fast independently unverified; do not change it or claim verified inheritance. Independent review is required for the stable auth/concurrency/recovery changes; reviewer runtime read-only sandbox must be verified.
 
