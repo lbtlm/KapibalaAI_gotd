@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -105,6 +106,9 @@ func New(parent context.Context, c Config) (*Service, error) {
 		respond(w, 200, map[string]string{"status": "ok", "mode": c.Mode})
 	})
 	s.mux.HandleFunc("POST /accounts/{accountId}/{operation}", s.accountHTTP)
+	s.mux.HandleFunc("POST /accounts/register", s.registerHTTP)
+	s.mux.HandleFunc("POST /accounts/{accountId}/check", s.inspectHTTP)
+	s.mux.HandleFunc("GET /accounts/{accountId}/joined-groups", s.inspectHTTP)
 	s.mux.HandleFunc("POST /groups", s.groupHTTP)
 	s.mux.HandleFunc("POST /groups/import", s.importHTTP)
 	s.mux.HandleFunc("POST /groups/{groupId}/{operation}", s.groupHTTP)
@@ -309,6 +313,42 @@ func (s *Service) accountHTTP(w http.ResponseWriter, r *http.Request) {
 	a := s.state.Accounts[id]
 	switch op {
 	case "connect":
+		var request struct {
+			ConnectionID string `json:"connectionId"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+		decoder.DisallowUnknownFields()
+		if e := decoder.Decode(&request); e != nil && !errors.Is(e, io.EOF) || len(request.ConnectionID) > 128 {
+			fail(w, &APIError{400, "INVALID_INPUT", 0})
+			return
+		}
+		if request.ConnectionID == "" {
+			request.ConnectionID = a.ConnectionID
+			if request.ConnectionID == "" {
+				nonce, err := randomID()
+				if err != nil {
+					fail(w, err)
+					return
+				}
+				request.ConnectionID = "legacy-" + stringID(nonce)
+			}
+		}
+		if request.ConnectionID != "" && a.EndedConnections[request.ConnectionID] {
+			fail(w, &APIError{409, "CONNECTION_ENDED", 0})
+			return
+		}
+		if a.ConnectionID != "" && a.ConnectionID != request.ConnectionID {
+			fail(w, &APIError{409, "CONNECTION_CONFLICT", 0})
+			return
+		}
+		if a.ConnectionID != request.ConnectionID {
+			a.ConnectionID = request.ConnectionID
+			if e := s.save(opCtx); e != nil {
+				fail(w, e)
+				return
+			}
+		}
+		opCtx = context.WithValue(opCtx, connectionIDKey{}, request.ConnectionID)
 		if s.cfg.Telegram != nil {
 			s.mu.Unlock()
 			pid, e := s.cfg.Telegram.Connect(opCtx, id)
@@ -317,20 +357,26 @@ func (s *Service) accountHTTP(w http.ResponseWriter, r *http.Request) {
 				fail(w, err)
 				return
 			}
-			if e != nil {
-				s.commitHTTP(w, r, 0, nil, s.accountFailure(id, e))
-				return
-			}
 			if err := s.accountError(id, false); err != nil {
 				s.commitHTTP(w, r, 0, nil, err)
+				return
+			}
+			if current := s.state.Accounts[id]; current.ConnectionID != request.ConnectionID || request.ConnectionID != "" && current.EndedConnections[request.ConnectionID] {
+				fail(w, &APIError{409, "CONNECTION_ENDED", 0})
+				return
+			}
+			if e != nil {
+				s.commitHTTP(w, r, 0, nil, s.accountFailure(id, e))
 				return
 			}
 			a = s.state.Accounts[id]
 			a.PlatformID = pid
 		}
 		a.Status = "online"
-		s.commitHTTP(w, r, 200, map[string]string{"platformUserId": a.PlatformID}, nil)
+		s.commitHTTP(w, r, 200, map[string]string{"platformUserId": a.PlatformID, "connectionId": a.ConnectionID}, nil)
 	case "disconnect":
+		connectionID := a.ConnectionID
+		opCtx = context.WithValue(opCtx, connectionIDKey{}, connectionID)
 		if s.cfg.Telegram != nil {
 			s.mu.Unlock()
 			e := s.cfg.Telegram.Disconnect(opCtx, id)
@@ -339,17 +385,22 @@ func (s *Service) accountHTTP(w http.ResponseWriter, r *http.Request) {
 				fail(w, err)
 				return
 			}
-			if e != nil {
-				s.commitHTTP(w, r, 0, nil, s.accountFailure(id, e))
-				return
-			}
 			if err := s.accountError(id, false); err != nil {
 				s.commitHTTP(w, r, 0, nil, err)
+				return
+			}
+			if s.state.Accounts[id].ConnectionID != connectionID {
+				fail(w, &APIError{409, "CONNECTION_ENDED", 0})
+				return
+			}
+			if e != nil {
+				s.commitHTTP(w, r, 0, nil, s.accountFailure(id, e))
 				return
 			}
 			a = s.state.Accounts[id]
 		}
 		a.Status = "offline"
+		s.endConnection(a)
 		s.commitHTTP(w, r, 200, map[string]any{}, nil)
 	default:
 		fail(w, &APIError{404, "NOT_FOUND", 0})

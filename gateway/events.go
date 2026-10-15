@@ -142,11 +142,18 @@ func (s *Service) adminHTTP(w http.ResponseWriter, r *http.Request) {
 		if e.Type == "account_status" {
 			aid, _ := e.Data["accountId"].(string)
 			status, _ := e.Data["status"].(string)
-			if (status != "suspended" && status != "session_expired") || s.state.Accounts[aid] == nil {
+			if (status != "suspended" && status != "session_expired" && status != "offline") || s.state.Accounts[aid] == nil {
 				fail(w, &APIError{400, "INVALID_INPUT", 0})
 				return
 			}
-			s.terminal(aid, status)
+			if status == "offline" {
+				cid, _ := e.Data["connectionId"].(string)
+				if !s.ordinaryOffline(aid, cid) {
+					s.emit(e.Type, e.Data)
+				}
+			} else {
+				s.terminal(aid, status)
+			}
 		} else {
 			gid, _ := e.Data["groupId"].(string)
 			pid, _ := e.Data["platformUserId"].(string)

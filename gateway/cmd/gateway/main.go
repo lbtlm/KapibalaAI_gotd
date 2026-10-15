@@ -31,7 +31,10 @@ func main() {
 	}
 	cfg := gateway.Config{Mode: mode, Store: store, AdminEnabled: os.Getenv("GATEWAY_ADMIN_ENABLED") == "true"}
 	if mode == "telegram" {
-		configs, e := gateway.LoadAccountConfigs(os.Getenv("TELEGRAM_ACCOUNTS_FILE"))
+		var configs []gateway.AccountConfig
+		if path := os.Getenv("TELEGRAM_ACCOUNTS_FILE"); path != "" {
+			configs, e = gateway.LoadAccountConfigs(path)
+		}
 		if e != nil {
 			slog.Error("read private Telegram account manifest")
 			store.Close()

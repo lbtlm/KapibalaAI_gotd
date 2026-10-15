@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/gotd/td/session"
@@ -19,11 +20,13 @@ import (
 )
 
 type onlineSession struct {
-	client *telegram.Client
-	api    *tg.Client
-	cancel context.CancelFunc
-	done   chan struct{}
-	self   *tg.User
+	intentionalStop bool
+	connectionID    string
+	client          *telegram.Client
+	api             *tg.Client
+	cancel          context.CancelFunc
+	done            chan struct{}
+	self            *tg.User
 }
 
 // TelegramAdapter owns one gotd Run/update manager per configured account.
@@ -53,9 +56,34 @@ func NewTelegramAdapter(ctx context.Context, db *sql.DB, configs []AccountConfig
 		}
 		a.configs[c.ID] = c
 	}
-	if len(configs) == 0 {
-		cancel()
-		return nil, errors.New("Telegram accounts required")
+	if db != nil {
+		rows, err := db.QueryContext(ctx, "SELECT config FROM gateway_account_configs")
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var b []byte
+			var c AccountConfig
+			if err = rows.Scan(&b); err != nil {
+				cancel()
+				return nil, err
+			}
+			if err = json.Unmarshal(b, &c); err != nil {
+				cancel()
+				return nil, err
+			}
+			if old, ok := a.configs[c.ID]; ok && (old.APIID != c.APIID || old.APIHash != c.APIHash) {
+				cancel()
+				return nil, errors.New("conflicting persisted Telegram account configuration")
+			}
+			a.configs[c.ID] = c
+		}
+		if err = rows.Err(); err != nil {
+			cancel()
+			return nil, err
+		}
 	}
 	return a, nil
 }
@@ -83,13 +111,14 @@ func (a *TelegramAdapter) Resume(s *Service) {
 			continue
 		}
 		id := id
+		connectionID := acct.ConnectionID
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			pid, err := a.Connect(s.ctx, id)
+			pid, err := a.Connect(context.WithValue(s.ctx, connectionIDKey{}, connectionID), id)
 			s.mu.Lock()
 			acct := s.state.Accounts[id]
-			if acct == nil {
+			if acct == nil || acct.Status != "online" || acct.ConnectionID != connectionID || s.ctx.Err() != nil {
 				s.mu.Unlock()
 				return
 			}
@@ -103,10 +132,12 @@ func (a *TelegramAdapter) Resume(s *Service) {
 				case "SESSION_EXPIRED":
 					s.terminal(id, "session_expired")
 				default:
-					acct.Status = "offline"
+					s.ordinaryOffline(id, connectionID)
 				}
 			}
-			_ = s.save(context.Background())
+			if e := s.save(context.Background()); e != nil {
+				s.cancel()
+			}
 			s.mu.Unlock()
 			if err == nil {
 				_ = a.RecoverEffects(s.ctx, id)
@@ -123,7 +154,23 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (string, error
 		return "", err
 	}
 	if s := a.sessions[id]; s != nil {
-		return stringID(s.self.ID), nil
+		ended := false
+		select {
+		case <-s.done:
+			ended = true
+		default:
+		}
+		cid, _ := ctx.Value(connectionIDKey{}).(string)
+		if ended {
+			if cid == "" || cid == s.connectionID {
+				return "", &APIError{409, "CONNECTION_ENDED", 0}
+			}
+			delete(a.sessions, id)
+		} else if cid != "" && s.connectionID != cid {
+			return "", &APIError{409, "CONNECTION_CONFLICT", 0}
+		} else {
+			return stringID(s.self.ID), nil
+		}
 	}
 	c, ok := a.configs[id]
 	if !ok {
@@ -144,7 +191,8 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (string, error
 	runCtx, cancel := context.WithCancel(a.ctx)
 	var manager *updates.Manager
 	client := telegram.NewClient(c.APIID, c.APIHash, telegram.Options{SessionStorage: storage, UpdateHandler: telegram.UpdateHandlerFunc(func(ctx context.Context, u tg.UpdatesClass) error { return manager.Handle(ctx, u) }), MigrationTimeout: 120 * time.Second, Device: telegram.DeviceConfig{DeviceModel: c.DeviceModel, SystemVersion: c.SystemVersion, AppVersion: c.AppVersion, LangCode: "en", SystemLangCode: "en-US"}})
-	s := &onlineSession{client: client, api: a.fencedClient(tg.NewClient(client)), cancel: cancel, done: make(chan struct{})}
+	cid, _ := ctx.Value(connectionIDKey{}).(string)
+	s := &onlineSession{connectionID: cid, client: client, api: a.fencedClient(tg.NewClient(client)), cancel: cancel, done: make(chan struct{})}
 	pipeline := a.Updates(id, s.api, cancel)
 	manager = updates.New(updates.Config{Handler: pipeline.Handler, Storage: pipeline.Storage, AccessHasher: pipeline.AccessHasher, OnChannelTooLong: pipeline.OnChannelTooLong})
 	ready := make(chan error, 1)
@@ -167,9 +215,9 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (string, error
 		}
 		if err != nil && !errors.Is(err, context.Canceled) {
 			slog.Warn("Telegram connection ended", "accountId", id, "code", platformError(err).Error())
-			if a.service != nil {
-				go a.connectionEnded(id, s, err)
-			}
+		}
+		if a.service != nil {
+			go a.connectionEnded(id, s, err)
 		}
 	}()
 	connectCtx, connectCancel := context.WithTimeout(ctx, 30*time.Second)
@@ -199,7 +247,11 @@ func (a *TelegramAdapter) Disconnect(ctx context.Context, id string) error {
 	}
 	s := a.sessions[id]
 	if s != nil {
-		delete(a.sessions, id)
+		if cid, _ := ctx.Value(connectionIDKey{}).(string); cid != "" && s.connectionID != "" && s.connectionID != cid {
+			a.mu.Unlock()
+			return &APIError{409, "CONNECTION_ENDED", 0}
+		}
+		s.intentionalStop = true
 		s.cancel()
 	}
 	a.mu.Unlock()
@@ -240,15 +292,21 @@ func (a *TelegramAdapter) online(id string) (*onlineSession, error) {
 }
 func (a *TelegramAdapter) connectionEnded(id string, old *onlineSession, err error) {
 	a.mu.Lock()
-	if a.sessions[id] != old {
+	if a.sessions[id] != old || old.intentionalStop {
 		a.mu.Unlock()
 		return
 	}
-	delete(a.sessions, id)
 	a.mu.Unlock()
 	s := a.service
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.ctx.Err() != nil {
+		return
+	}
+	acct := s.state.Accounts[id]
+	if acct == nil || acct.ConnectionID != old.connectionID || acct.Status == "suspended" || acct.Status == "session_expired" {
+		return
+	}
 	e := platformError(err)
 	if e == nil {
 		e = &APIError{409, "ACCOUNT_OFFLINE", 0}
@@ -259,12 +317,11 @@ func (a *TelegramAdapter) connectionEnded(id string, old *onlineSession, err err
 	case "SESSION_EXPIRED":
 		s.terminal(id, "session_expired")
 	default:
-		if account := s.state.Accounts[id]; account != nil {
-			account.Status = "offline"
-		}
+		s.ordinaryOffline(id, old.connectionID)
 	}
 	if err = s.save(context.Background()); err != nil {
 		slog.Error("persist Telegram disconnection", "accountId", id, "error", err)
+		s.cancel()
 	}
 }
 func platformError(err error) *APIError {

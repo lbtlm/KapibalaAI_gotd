@@ -13,6 +13,9 @@ type account struct {
 	Status       string    `json:"status"`
 	RateUntil    time.Time `json:"rateUntil"`
 	RetrySeconds int       `json:"retrySeconds"`
+
+	ConnectionID     string          `json:"connectionId,omitempty"`
+	EndedConnections map[string]bool `json:"endedConnections,omitempty"`
 }
 type group struct {
 	Owner                  string            `json:"owner"`
@@ -109,6 +112,8 @@ type state struct {
 	NextID      int64               `json:"nextId"`
 	NextEvent   int64               `json:"nextEvent"`
 	CreateKeys  map[string]string   `json:"createKeys"`
+
+	Registrations map[string]registration `json:"registrations,omitempty"`
 }
 
 func initialState() state {

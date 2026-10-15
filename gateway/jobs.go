@@ -18,6 +18,7 @@ func (s *Service) terminal(aid, status string) {
 		return
 	}
 	a.Status = status
+	s.endConnection(a)
 	s.emit("account_status", map[string]any{"accountId": aid, "status": status})
 	for gid, g := range s.state.Groups {
 		if g.Members[a.PlatformID] {
