@@ -157,7 +157,14 @@ func (a *App) messages(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 func (a *App) sendTick(ctx context.Context) {
-	for _, id := range a.ids(ctx, `SELECT id FROM accounts WHERE status IN ('online','rate_limited') UNION SELECT DISTINCT account_id FROM messages WHERE delivery_status IN ('dispatching','unknown')`) {
+	// Reserve workers only for actionable account FIFO heads. Idle accounts and
+	// future retries must not consume the bounded send pool.
+	for _, id := range a.ids(ctx, `SELECT a.id FROM accounts a JOIN LATERAL (
+		SELECT id,delivery_status,reconcile_after FROM messages WHERE account_id=a.id
+		AND delivery_status IN ('queued','dispatching','unknown') ORDER BY id LIMIT 1
+	) m ON true WHERE
+	(m.delivery_status='queued' AND (a.status='online' OR (a.status='rate_limited' AND COALESCE(a.rate_limited_until,now())<=now())))
+	OR (m.delivery_status IN ('dispatching','unknown') AND COALESCE(m.reconcile_after,now())<=now()) ORDER BY m.id`) {
 		a.launchWorker(ctx, "send:"+id, func(ctx context.Context) error { return a.sendOne(ctx, id) })
 	}
 }
@@ -172,15 +179,6 @@ func (a *App) sendOne(ctx context.Context, account string) error {
 	e = tx.QueryRow(ctx, `SELECT status,rate_limited_until FROM accounts WHERE id=$1 FOR UPDATE`, account).Scan(&status, &until)
 	if e != nil {
 		return e
-	}
-	if status == "rate_limited" {
-		if until != nil && time.Now().Before(*until) {
-			return nil
-		}
-		if e = transition(ctx, tx, account, status, "online", nil); e != nil {
-			return e
-		}
-		status = "online"
 	}
 	var id, groupID, gatewayID, text, state string
 	var started, reconcile *time.Time
@@ -197,6 +195,15 @@ func (a *App) sendOne(ctx context.Context, account string) error {
 			return e
 		}
 		return a.reconcileMessage(ctx, id, groupID, gatewayID, account, text, started, reconcile, retries)
+	}
+	if status == "rate_limited" {
+		if until != nil && time.Now().Before(*until) {
+			return nil
+		}
+		if e = transition(ctx, tx, account, status, "online", nil); e != nil {
+			return e
+		}
+		status = "online"
 	}
 	if status != "online" {
 		return nil
@@ -296,7 +303,9 @@ func (a *App) reconcileMessage(ctx context.Context, id, groupID, gatewayID, acco
 	}
 	var x *externalError
 	if !errors.As(e, &x) || x.Status != 404 {
-		return nil
+		// A temporarily unavailable gateway must not monopolize the send pool.
+		_, err := a.pool.Exec(ctx, `UPDATE messages SET reconcile_after=now()+interval '2 seconds' WHERE client_msg_id=$1 AND delivery_status IN ('dispatching','unknown')`, id)
+		return err
 	}
 	if reconcile != nil && time.Now().Before(*reconcile) {
 		return nil

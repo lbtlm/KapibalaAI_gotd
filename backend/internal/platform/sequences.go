@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/lbtlm/KapibalaAI_gotd/backend/internal/domain"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -256,16 +257,18 @@ func (a *App) startSequence(w http.ResponseWriter, r *http.Request) error {
 }
 
 type sequenceRunStep struct {
-	Index        int               `json:"index"`
-	Text         string            `json:"text"`
-	AccountID    *string           `json:"accountId"`
-	AccountRole  string            `json:"accountRole"`
-	Status       string            `json:"status"`
-	ScheduledAt  *time.Time        `json:"scheduledAt"`
-	SentAt       *time.Time        `json:"sentAt"`
-	ClientMsgID  *string           `json:"clientMsgId"`
-	ResolvedVars map[string]string `json:"resolvedVars"`
-	VarSources   map[string]string `json:"varSources"`
+	Index          int               `json:"index"`
+	Text           string            `json:"text"`
+	AccountID      *string           `json:"accountId"`
+	AccountRole    string            `json:"accountRole"`
+	Status         string            `json:"status"`
+	DeliveryStatus *string           `json:"deliveryStatus"`
+	FailCode       *string           `json:"failCode"`
+	ScheduledAt    *time.Time        `json:"scheduledAt"`
+	SentAt         *time.Time        `json:"sentAt"`
+	ClientMsgID    *string           `json:"clientMsgId"`
+	ResolvedVars   map[string]string `json:"resolvedVars"`
+	VarSources     map[string]string `json:"varSources"`
 }
 
 func (a *App) sequenceRun(w http.ResponseWriter, r *http.Request) error {
@@ -279,7 +282,7 @@ func (a *App) sequenceRun(w http.ResponseWriter, r *http.Request) error {
 	if e != nil {
 		return e
 	}
-	rows, e := a.pool.Query(ctx, `SELECT index,status,scheduled_at,sent_at,client_msg_id,resolved_vars,var_sources,text,account_id,account_role FROM sequence_steps WHERE run_id=$1 ORDER BY index`, r.PathValue("id"))
+	rows, e := a.pool.Query(ctx, `SELECT s.index,s.status,s.scheduled_at,s.sent_at,s.client_msg_id,s.resolved_vars,s.var_sources,s.text,s.account_id,s.account_role,m.delivery_status,m.fail_code FROM sequence_steps s LEFT JOIN messages m ON m.client_msg_id=s.client_msg_id WHERE s.run_id=$1 ORDER BY s.index`, r.PathValue("id"))
 	if e != nil {
 		return e
 	}
@@ -288,7 +291,7 @@ func (a *App) sequenceRun(w http.ResponseWriter, r *http.Request) error {
 	for rows.Next() {
 		var s sequenceRunStep
 		var v, source json.RawMessage
-		if e = rows.Scan(&s.Index, &s.Status, &s.ScheduledAt, &s.SentAt, &s.ClientMsgID, &v, &source, &s.Text, &s.AccountID, &s.AccountRole); e != nil {
+		if e = rows.Scan(&s.Index, &s.Status, &s.ScheduledAt, &s.SentAt, &s.ClientMsgID, &v, &source, &s.Text, &s.AccountID, &s.AccountRole, &s.DeliveryStatus, &s.FailCode); e != nil {
 			return e
 		}
 		json.Unmarshal(v, &s.ResolvedVars)
@@ -297,6 +300,58 @@ func (a *App) sequenceRun(w http.ResponseWriter, r *http.Request) error {
 	}
 	respond(w, 200, map[string]any{"status": status, "currentStepIndex": index, "steps": steps})
 	return rows.Err()
+}
+func (a *App) sequenceHistory(w http.ResponseWriter, r *http.Request) error {
+	ctx, group := r.Context(), r.PathValue("id")
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit < 1 || limit > 50 {
+		limit = 20
+	}
+	before := r.URL.Query().Get("before")
+	var at *time.Time
+	if before != "" {
+		if e := a.pool.QueryRow(ctx, `SELECT created_at FROM sequence_runs WHERE id=$1 AND group_id=$2`, before, group).Scan(&at); e == pgx.ErrNoRows {
+			return fail(400, "INVALID_CURSOR")
+		} else if e != nil {
+			return e
+		}
+	}
+	rows, e := a.pool.Query(ctx, `SELECT r.id,r.sequence_id,s.name,r.status,r.current_step_index,r.created_at,
+		(SELECT count(*) FROM sequence_steps WHERE run_id=r.id),
+		(SELECT count(*) FROM sequence_steps WHERE run_id=r.id AND status IN ('sent','skipped','failed'))
+		FROM sequence_runs r JOIN sequences s ON s.id=r.sequence_id WHERE r.group_id=$1 AND ($2::timestamptz IS NULL OR (r.created_at,r.id)<($2,$3)) ORDER BY r.created_at DESC,r.id DESC LIMIT $4`, group, at, before, limit+1)
+	if e != nil {
+		return e
+	}
+	defer rows.Close()
+	type batch struct {
+		ID               string    `json:"id"`
+		SequenceID       string    `json:"sequenceId"`
+		SequenceName     string    `json:"sequenceName"`
+		Status           string    `json:"status"`
+		CurrentStepIndex int       `json:"currentStepIndex"`
+		CreatedAt        time.Time `json:"createdAt"`
+		TotalSteps       int       `json:"totalSteps"`
+		CompletedSteps   int       `json:"completedSteps"`
+	}
+	items := []batch{}
+	for rows.Next() {
+		var b batch
+		if e = rows.Scan(&b.ID, &b.SequenceID, &b.SequenceName, &b.Status, &b.CurrentStepIndex, &b.CreatedAt, &b.TotalSteps, &b.CompletedSteps); e != nil {
+			return e
+		}
+		items = append(items, b)
+	}
+	if e = rows.Err(); e != nil {
+		return e
+	}
+	var next *string
+	if len(items) > limit {
+		items = items[:limit]
+		next = &items[limit-1].ID
+	}
+	respond(w, 200, map[string]any{"items": items, "nextCursor": next})
+	return nil
 }
 func (a *App) sequenceTick(ctx context.Context) {
 	for _, id := range a.ids(ctx, `SELECT id FROM sequence_runs WHERE status='running'`) {

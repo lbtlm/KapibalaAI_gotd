@@ -262,3 +262,11 @@ Red：新增模型回复预演 HTTP 测试首先得到404；暂停接口权限�
 真实DeepSeek协议测试 `TestLiveProviderToolConversationAndAudit` 完成读取工具→finish与pass审计；合成内容且不连接Telegram。预演接口与此协议证据分别验证，不等同真实群发送或退群验收。主控按用户明确要求独立检查暂停准入、在途确认、恢复互斥、锁顺序及既有单run约束，没有委派独立reviewer。
 
 R27 部署验收：本机5173已部署代码候选fa08768，schema版本11；Gateway容器ID及启动时间保持一致，前端/后端/Agent更新，运行模式openai。部署后再次执行实际浏览器800/1366/1920/2560布局、标签不重叠、外部提示已读消失、剧本变量即时预览与后台预检确认取消、聊天定位最新、日志表格检查，页面无异常且未触发业务写入。AI回复预演调用真实deepseek-flash，用时2.425秒，针对合成活动背景返回59字相关回复；预演未发送Telegram消息。真实模型工具协议复测4.69秒通过。忽略目录ui-r27保存截图与结果；不把该证据等同真实群暂停/恢复/发送/退群验收。
+
+## R29 主控：发送队列饥饿、批次历史与 Agent 可观察性
+
+Red：TestIdleAccountsCannotStarveQueuedCampaignWork 在 30 个空闲在线账号输入下，实际 App worker 未处理队尾的已取消剧本消息（仍 queued）；修复后 cancelled，无 Gateway 调用。原因是每轮所有在线账号竞争 4 个发送名额，空闲账号反复抢占。调度改为只选择每账号 FIFO 队首的就绪消息；未来限流与对账重试不占用名额，对账暂不可用有短暂退避。保持账号锁、幂等、发出确认和上一条实际 sentAt 起算延迟。
+
+批次历史 Red=GET 405，完整工具结果 Red=缺少 result，长协议响应 Red=2KiB 后丢失。Green：分页严格限定 group、按 createdAt/id 倒序，读取既有 sequence_runs/steps，无新表；批次明细显示消息真实投递状态及错误码。Agent detail 从既有 history 的 tool_result 回填只读 result，不复制持久化；摘要仍 200 字，工具结果仍 8KiB，rawResponse 保留传输读取上限内的原文。符合 2.2/A5 的 end_turn/finish 不发送、四工具协议、审计先行和执行预算。
+
+定向隔离 PostgreSQL 回归通过（15.938s），包含上述4个新行为、12步边界、重复tool-id、外部消息筛选、锁定管理员、剧本快照和暂停；race（22.695s）覆盖新行为、持久群会话、取消消息不复发、协议错误与工具历史。provider/domain 常规测试通过。TestLiveAmbiguousMessageRequestsAuditedReply 调用真实 DeepSeek（5.10s）：合成111输入→get_recent_messages→send_message澄清→独立审计pass；停在工具请求，不调用Gateway/Telegram。没有把模型summary变成群消息，未绕过审核；旧含糊消息不会被重放。

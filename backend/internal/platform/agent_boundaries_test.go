@@ -105,3 +105,31 @@ func TestDuplicateToolIDRecordsProtocolErrorWithoutRepeatingRead(t *testing.T) {
 		t.Fatalf("duplicate read changed protocol/audit count: audits=%d turns=%d", audits.Load(), turns.Load())
 	}
 }
+
+func TestProtocolErrorPreservesOriginalResponseBeyondTwoKilobytes(t *testing.T) {
+	raw := strings.Repeat("无效协议", 600) + "END-EVIDENCE"
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, raw) }))
+	defer agent.Close()
+	a, s, cfg := fixtureConfig(t, platform.Config{AgentURL: agent.URL})
+	group := insertAgentInput(t, cfg)
+	if e := a.Start(context.Background()); e != nil {
+		t.Fatal(e)
+	}
+	token, _ := login(t, s, "viewer")
+	eventually(t, 5*time.Second, func() bool {
+		runs := runList(t, s, token, group)
+		if len(runs) != 1 || runs[0]["status"] == "running" {
+			return false
+		}
+		steps := runs[0]["steps"].([]any)
+		if len(steps) != 3 {
+			t.Fatalf("expected three protocol failures")
+		}
+		for _, v := range steps {
+			if v.(map[string]any)["rawResponse"] != raw {
+				t.Fatal("original protocol response truncated")
+			}
+		}
+		return true
+	})
+}

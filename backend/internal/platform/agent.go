@@ -20,6 +20,7 @@ type agentStep struct {
 	Name          *string         `json:"name"`
 	Input         json.RawMessage `json:"input"`
 	ResultSummary string          `json:"resultSummary"`
+	Result        string          `json:"result,omitempty"`
 	IsError       bool            `json:"isError"`
 	ErrorCode     *string         `json:"errorCode"`
 	AuditVerdict  *string         `json:"auditVerdict"`
@@ -71,6 +72,24 @@ func (a *App) agentGet(w http.ResponseWriter, r *http.Request) error {
 	run, e := a.loadAgent(r.Context(), r.PathValue("id"))
 	if e != nil {
 		return e
+	}
+	// Tool results already live in history. Enrich this read DTO without storing
+	// a second copy or exposing the private model conversation.
+	results := map[string]string{}
+	for _, message := range run.History {
+		if message.Role != "user" {
+			continue
+		}
+		for _, block := range message.Content {
+			if block.Type == "tool_result" {
+				results[block.ToolUseID] = block.Content
+			}
+		}
+	}
+	for i := range run.Steps {
+		if id := run.Steps[i].ToolUseID; id != nil {
+			run.Steps[i].Result = results[*id]
+		}
 	}
 	respond(w, 200, run)
 	return nil
@@ -131,16 +150,6 @@ func truncateRunes(s string, n int) string {
 	r := []rune(s)
 	if len(r) > n {
 		return string(r[:n])
-	}
-	return s
-}
-func truncateBytes(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	s = s[:n]
-	for !utf8.ValidString(s) {
-		s = s[:len(s)-1]
 	}
 	return s
 }
@@ -332,7 +341,7 @@ func (a *App) executeAgent(ctx context.Context, id string) error {
 			if ctx.Err() != nil {
 				if ctx.Err() == context.DeadlineExceeded && parent.Err() == nil {
 					timeout := "TURN_TIMEOUT"
-					r.Steps = append(r.Steps, agentStep{Kind: "protocol_error", ResultSummary: timeout, IsError: true, ErrorCode: &timeout, RawResponse: truncateBytes(string(raw), 2048)})
+					r.Steps = append(r.Steps, agentStep{Kind: "protocol_error", ResultSummary: timeout, IsError: true, ErrorCode: &timeout, RawResponse: string(raw)})
 					endAgent(&r, "wall_clock", "")
 					return a.saveAgent(parent, &r)
 				}
@@ -351,7 +360,7 @@ func (a *App) executeAgent(ctx context.Context, id string) error {
 				}
 			}
 			if code != "" {
-				r.Steps = append(r.Steps, agentStep{Kind: "protocol_error", ResultSummary: code, IsError: true, ErrorCode: &code, RawResponse: truncateBytes(string(raw), 2048)})
+				r.Steps = append(r.Steps, agentStep{Kind: "protocol_error", ResultSummary: code, IsError: true, ErrorCode: &code, RawResponse: string(raw)})
 				r.History = append(r.History, domain.ChatMessage{Role: "user", Content: []domain.Block{{Type: "text", Text: "PROTOCOL_ERROR " + code + ": invalid agent response"}}})
 				r.ProtocolErrors++
 				if e = checkpoint(); e != nil {
@@ -362,13 +371,13 @@ func (a *App) executeAgent(ctx context.Context, id string) error {
 			b := out.Content[0]
 			if out.StopReason == "end_turn" {
 				r.ProtocolErrors = 0
-				r.Steps = append(r.Steps, agentStep{Kind: "final", ResultSummary: truncateRunes(b.Text, 200), RawResponse: truncateBytes(string(raw), 2048)})
+				r.Steps = append(r.Steps, agentStep{Kind: "final", ResultSummary: truncateRunes(b.Text, 200), RawResponse: string(raw)})
 				endAgent(&r, "final", b.Text)
 				return checkpoint()
 			}
 			r.History = append(r.History, domain.ChatMessage{Role: "assistant", Content: []domain.Block{b}})
 			toolID, name := b.ID, b.Name
-			r.Steps = append(r.Steps, agentStep{Kind: "tool_use", ToolUseID: &toolID, Name: &name, Input: b.Input, RawResponse: truncateBytes(string(raw), 2048)})
+			r.Steps = append(r.Steps, agentStep{Kind: "tool_use", ToolUseID: &toolID, Name: &name, Input: b.Input, RawResponse: string(raw)})
 			r.Pending = &pendingTool{Block: b, Stage: "validate"}
 			if e = checkpoint(); e != nil {
 				return e

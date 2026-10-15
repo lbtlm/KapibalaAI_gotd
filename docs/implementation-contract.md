@@ -88,3 +88,11 @@ The next approved work is specified in [the account inspection contract](account
 POST /api/groups/{id}/marketing/pause|resume 仅管理员可用。暂停持久保存 marketing_paused，保留群/成员/剧本配置和 Agent 启用偏好，取消本次剧本、待触发消息及尚未发出的自动消息；手动发送与群管理保留。旧在途请求继续确认，恢复在 Agent/自动消息/移除成员结果未确定时返回 MARKETING_DRAINING。恢复使原 Agent 待命；同一剧本由用户预览确认后重新从第1步运行。取消任务的迟到重试不能重新发送。彻底结束继续使用既有 leave-all / B2 drain 与依次退群流程。暂停、恢复日志复用 jobs.logs。
 
 GET /api/agent/status 暴露运行模式、模型名、是否配置，不暴露密钥。POST /api/agent/reply-preview 为管理员提供真实模型的无工具模拟回复，复用现有生成协议与分层超时；无消息、run或发送意图入库。用户明确批准本机已启用群的自动回复切换为 AGENT_MODE=openai，使用既有私有 DeepSeek 配置；无固定文案回退。正式自动回复继续经过既有工具执行、审计和管理员身份约束。
+
+## R29 2026-10-15 群工作区补充契约
+
+- 发送调度只给有就绪 FIFO 消息的账号分配 worker；普通在线但无消息的账号不占发送名额。
+- 群剧本配置、批次记录分离；每次启动保留独立 run，按时间分页，显示账号姓名/手机号、计划时间、真实投递状态和错误码。
+- 外部消息并入实时聊天，以 warning 标识和浅色消息背景识别；快捷回复可选择群内账号，显式发送文本引用，不冒充 Telegram 原生 reply-to。
+- Agent 对不明确的新外部消息给出简短确认和一个澄清问题，通过 send_message 和既有审计链路；finish/end_turn 仅为内部总结。尊重不回复请求与审计拒绝。
+- 工具结果全文从既有 history 提供，只读 DTO 展示，保留 8KiB 工具边界及截断标记；原始协议响应不再二次裁剪到2KiB。每群独立持久 Agent、单 run 互斥、预算与暂停/结束语义不变。
