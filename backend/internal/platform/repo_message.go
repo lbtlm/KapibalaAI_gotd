@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jackc/pgx/v5"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,6 +15,15 @@ import (
 )
 
 type Message struct {
+	MediaID              *string   `json:"mediaId"`
+	MediaURL             *string   `json:"mediaUrl"`
+	MediaKind            *string   `json:"mediaKind"`
+	MediaMime            *string   `json:"mediaMime"`
+	MediaName            *string   `json:"mediaName"`
+	MediaSize            *int64    `json:"mediaSize"`
+	MediaStatus          *string   `json:"mediaStatus"`
+	MediaError           *string   `json:"mediaError"`
+	LocalFilePath        *string   `json:"localFilePath"`
 	MsgID                *string   `json:"msgId"`
 	ClientMsgID          *string   `json:"clientMsgId"`
 	SenderPlatformUserID string    `json:"senderPlatformUserId"`
@@ -154,26 +162,28 @@ func (a *App) messages(w http.ResponseWriter, r *http.Request) error {
 		s := snapshot + ":" + strconv.Itoa(end)
 		next = &s
 	}
-	respond(w, 200, map[string]any{"items": items[offset:end], "nextCursor": next})
+	page := items[offset:end]
+	// Cursors freeze ordering, not file availability. Never return a stale path
+	// from a snapshot after the retention worker has removed its attachment.
+	if e := a.populateMedia(ctx, r.PathValue("id"), page); e != nil {
+		return e
+	}
+	respond(w, 200, map[string]any{"items": page, "nextCursor": next})
 	return nil
 }
 func (a *App) sendTick(ctx context.Context) {
-	for _, id := range a.ids(ctx, `SELECT id FROM accounts WHERE status IN ('online','rate_limited') UNION SELECT DISTINCT account_id FROM messages WHERE delivery_status IN ('dispatching','unknown')`) {
-		a.sendMu.Lock()
-		if a.sending[id] {
-			a.sendMu.Unlock()
-			continue
-		}
-		a.sending[id] = true
-		a.sendMu.Unlock()
-		a.wg.Add(1)
-		go func(id string) {
-			defer a.wg.Done()
-			defer func() { a.sendMu.Lock(); delete(a.sending, id); a.sendMu.Unlock() }()
-			if e := a.lock(ctx, "send:"+id, func(ctx context.Context) error { return a.sendOne(ctx, id) }); e != nil && ctx.Err() == nil {
-				slog.Warn("send worker retrying", "accountId", id, "error", e)
-			}
-		}(id)
+	if e := a.expireRateLimits(ctx); e != nil {
+		return
+	}
+	// Reserve workers only for actionable account FIFO heads. Idle accounts and
+	// future retries must not consume the bounded send pool.
+	for _, id := range a.ids(ctx, `SELECT a.id FROM accounts a JOIN LATERAL (
+		SELECT id,delivery_status,reconcile_after FROM messages WHERE account_id=a.id
+		AND delivery_status IN ('queued','dispatching','unknown') ORDER BY id LIMIT 1
+	) m ON true WHERE
+	(m.delivery_status='queued' AND (a.status='online' OR (a.status='rate_limited' AND COALESCE(a.rate_limited_until,now())<=now())))
+	OR (m.delivery_status IN ('dispatching','unknown') AND COALESCE(m.reconcile_after,now())<=now()) ORDER BY m.id`) {
+		a.launchWorker(ctx, "send:"+id, func(ctx context.Context) error { return a.sendOne(ctx, id) })
 	}
 }
 func (a *App) sendOne(ctx context.Context, account string) error {
@@ -187,15 +197,6 @@ func (a *App) sendOne(ctx context.Context, account string) error {
 	e = tx.QueryRow(ctx, `SELECT status,rate_limited_until FROM accounts WHERE id=$1 FOR UPDATE`, account).Scan(&status, &until)
 	if e != nil {
 		return e
-	}
-	if status == "rate_limited" {
-		if until != nil && time.Now().Before(*until) {
-			return nil
-		}
-		if e = transition(ctx, tx, account, status, "online", nil); e != nil {
-			return e
-		}
-		status = "online"
 	}
 	var id, groupID, gatewayID, text, state string
 	var started, reconcile *time.Time
@@ -213,8 +214,32 @@ func (a *App) sendOne(ctx context.Context, account string) error {
 		}
 		return a.reconcileMessage(ctx, id, groupID, gatewayID, account, text, started, reconcile, retries)
 	}
+	if status == "rate_limited" {
+		if until != nil && time.Now().Before(*until) {
+			return nil
+		}
+		if e = transition(ctx, tx, account, status, "online", nil); e != nil {
+			return e
+		}
+		status = "online"
+	}
 	if status != "online" {
 		return nil
+	}
+	// A retry can requeue an already dispatched automation message after pause.
+	// Keep manual sends available; never dispatch cancelled campaign work anew.
+	stopped, e := automationStopped(ctx, tx, groupID, id)
+	if e != nil {
+		return e
+	}
+	if stopped {
+		if _, e = tx.Exec(ctx, `UPDATE messages SET delivery_status='cancelled',fail_code='MARKETING_STOPPED' WHERE client_msg_id=$1`, id); e != nil {
+			return e
+		}
+		if e = emit(ctx, tx, "message", map[string]any{"groupId": groupID, "clientMsgId": id, "isOwn": true}); e != nil {
+			return e
+		}
+		return tx.Commit(ctx)
 	}
 	now := time.Now()
 	_, e = tx.Exec(ctx, `UPDATE messages SET delivery_status='dispatching',dispatch_started_at=$2,reconcile_after=$2::timestamptz+interval '14 seconds' WHERE client_msg_id=$1`, id, now)
@@ -241,16 +266,7 @@ func (a *App) dispatch(ctx context.Context, id, groupID, gatewayID, account, tex
 		case "RATE_LIMITED":
 			var x *externalError
 			errors.As(e, &x)
-			until := time.Now().Add(time.Duration(x.RetryAfterSeconds * float64(time.Second)))
-			var from string
-			if err = tx.QueryRow(ctx, `SELECT status FROM accounts WHERE id=$1 FOR UPDATE`, account).Scan(&from); err != nil {
-				return err
-			}
-			if from == "online" {
-				err = transition(ctx, tx, account, from, "rate_limited", &until)
-			} else if from == "rate_limited" {
-				_, err = tx.Exec(ctx, `UPDATE accounts SET rate_limited_until=$2 WHERE id=$1`, account, until)
-			}
+			err = applyAccountRateLimit(ctx, tx, account, x.RetryAfterSeconds)
 			if err == nil {
 				_, err = tx.Exec(ctx, `UPDATE messages SET delivery_status='queued',dispatch_started_at=NULL WHERE client_msg_id=$1 AND delivery_status='dispatching'`, id)
 			}
@@ -305,7 +321,9 @@ func (a *App) reconcileMessage(ctx context.Context, id, groupID, gatewayID, acco
 	}
 	var x *externalError
 	if !errors.As(e, &x) || x.Status != 404 {
-		return nil
+		// A temporarily unavailable gateway must not monopolize the send pool.
+		_, err := a.pool.Exec(ctx, `UPDATE messages SET reconcile_after=now()+interval '2 seconds' WHERE client_msg_id=$1 AND delivery_status IN ('dispatching','unknown')`, id)
+		return err
 	}
 	if reconcile != nil && time.Now().Before(*reconcile) {
 		return nil
@@ -325,6 +343,19 @@ func (a *App) reconcileMessage(ctx context.Context, id, groupID, gatewayID, acco
 	}
 	if current == "sent" || current == "failed" || current == "cancelled" {
 		return nil
+	}
+	stopped, e := automationStopped(ctx, tx, groupID, id)
+	if e != nil {
+		return e
+	}
+	if stopped {
+		if _, e = tx.Exec(ctx, `UPDATE messages SET delivery_status='cancelled',fail_code='MARKETING_STOPPED' WHERE client_msg_id=$1`, id); e != nil {
+			return e
+		}
+		if e = emit(ctx, tx, "message", map[string]any{"groupId": groupID, "clientMsgId": id, "isOwn": true}); e != nil {
+			return e
+		}
+		return tx.Commit(ctx)
 	}
 	if retries >= 1 || accountStatus != "online" || groupStatus != "active" {
 		code := "NETWORK_TIMEOUT"
@@ -400,4 +431,11 @@ func unreachable(ctx context.Context, tx pgx.Tx, groupID string) error {
 		}
 	}
 	return nil
+}
+
+// Called only before a new dispatch/retry; reconciliation of accepted work still runs.
+func automationStopped(ctx context.Context, tx pgx.Tx, groupID, id string) (bool, error) {
+	var stopped bool
+	e := tx.QueryRow(ctx, `SELECT ((g.marketing_paused OR g.status!='active') AND (EXISTS(SELECT 1 FROM sequence_steps s WHERE s.client_msg_id=$2) OR EXISTS(SELECT 1 FROM agent_effects e WHERE e.client_msg_id=$2))) OR EXISTS(SELECT 1 FROM sequence_steps s JOIN sequence_runs r ON r.id=s.run_id WHERE s.client_msg_id=$2 AND r.status='cancelled') OR EXISTS(SELECT 1 FROM agent_effects e JOIN agent_runs r ON r.id=e.run_id WHERE e.client_msg_id=$2 AND r.status='cancelled') FROM groups g WHERE g.id=$1`, groupID, id).Scan(&stopped)
+	return stopped, e
 }

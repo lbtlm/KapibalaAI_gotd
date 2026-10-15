@@ -1,0 +1,11 @@
+ALTER TABLE groups ADD COLUMN title text NOT NULL DEFAULT '';
+ALTER TABLE groups ADD COLUMN username text NOT NULL DEFAULT '';
+ALTER TABLE groups ADD COLUMN invite_link text NOT NULL DEFAULT '';
+ALTER TABLE jobs ADD COLUMN logs jsonb NOT NULL DEFAULT '[]';
+ALTER TABLE groups ADD COLUMN admin_account_id text REFERENCES accounts ON DELETE SET NULL;
+ALTER TABLE groups ADD COLUMN sequence_config jsonb;
+UPDATE groups g SET admin_account_id=(SELECT m.account_id FROM members m WHERE m.group_id=g.id AND m.account_id IS NOT NULL AND m.role IN ('admin','creator') ORDER BY CASE WHEN m.role='admin' THEN 0 ELSE 1 END,m.account_id LIMIT 1);
+ALTER TABLE agent_runs ADD COLUMN admin_account_id text;
+UPDATE agent_runs r SET admin_account_id=g.admin_account_id FROM groups g WHERE r.group_id=g.id;
+ALTER TABLE sequence_steps ADD COLUMN account_id text;
+UPDATE sequence_steps s SET account_id=CASE WHEN s.account_role='admin' THEN g.admin_account_id ELSE (SELECT m.account_id FROM members m WHERE m.group_id=g.id AND m.role='member' AND m.account_id IS NOT NULL ORDER BY m.account_id LIMIT 1) END FROM sequence_runs r JOIN groups g ON g.id=r.group_id WHERE s.run_id=r.id;

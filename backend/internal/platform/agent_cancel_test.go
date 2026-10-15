@@ -13,7 +13,7 @@ import (
 )
 
 func TestSlowFinalTurnCancelsAfterPolicyClosesOrGroupBecomesUnreachable(t *testing.T) {
-	for _, change := range []string{"disabled", "unreachable"} {
+	for _, change := range []string{"disabled", "unreachable", "paused"} {
 		for _, final := range []string{"end_turn", "finish"} {
 			t.Run(change+"/"+final, func(t *testing.T) {
 				entered, release := make(chan struct{}), make(chan struct{})
@@ -29,22 +29,10 @@ func TestSlowFinalTurnCancelsAfterPolicyClosesOrGroupBecomesUnreachable(t *testi
 					}
 				}))
 				defer agent.Close()
-				g := gatewayFixture(t)
-				base := g.server.Config.Handler
-				g.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					if r.URL.Path == "/groups/gateway-group/send" {
-						w.WriteHeader(403)
-						fmt.Fprint(w, `{"code":"GROUP_WRITE_FORBIDDEN"}`)
-						return
-					}
-					base.ServeHTTP(w, r)
-				})
-				a, s := fixture(t, platform.Config{GatewayURL: g.server.URL, AgentURL: agent.URL})
+				a, s, cfg := fixtureConfig(t, platform.Config{AgentURL: agent.URL})
+				group := insertAgentInput(t, cfg)
 				a.Start(context.Background())
 				token, _ := login(t, s, "admin")
-				group := createGroup(t, s, token)
-				call(t, s, "PATCH", "/api/groups/"+group, token, `{"agentEnabled":true}`)
-				g.event("message", map[string]any{"groupId": "gateway-group", "msgId": "cancel-trigger", "senderPlatformUserId": "outside", "text": "trigger", "sentAt": time.Now().UTC().Format(time.RFC3339Nano)})
 				select {
 				case <-entered:
 				case <-time.After(4 * time.Second):
@@ -52,12 +40,16 @@ func TestSlowFinalTurnCancelsAfterPolicyClosesOrGroupBecomesUnreachable(t *testi
 				}
 				if change == "disabled" {
 					call(t, s, "PATCH", "/api/groups/"+group, token, `{"agentEnabled":false}`)
+				} else if change == "paused" {
+					if status, _, _ := call(t, s, "POST", "/api/groups/"+group+"/marketing/pause", token, ""); status != 200 {
+						t.Fatalf("pause %d", status)
+					}
+					if status, _, _ := call(t, s, "POST", "/api/groups/"+group+"/marketing/resume", token, ""); status != 409 {
+						t.Fatalf("resumed during in-flight turn %d", status)
+					}
 				} else {
-					call(t, s, "POST", "/api/groups/"+group+"/send", token, `{"accountId":"account-1","text":"detect forbidden"}`)
-					eventually(t, 2*time.Second, func() bool {
-						_, detail, _ := call(t, s, "GET", "/api/groups/"+group, token, "")
-						return detail["status"] == "unreachable"
-					})
+					// Direct persisted group input tests final-turn cancellation, not a platform error.
+					businessSQL(t, cfg, `UPDATE groups SET status='unreachable' WHERE id=$1`, group)
 				}
 				close(release)
 				eventually(t, 2*time.Second, func() bool {
@@ -70,6 +62,11 @@ func TestSlowFinalTurnCancelsAfterPolicyClosesOrGroupBecomesUnreachable(t *testi
 					}
 					return true
 				})
+				if change == "paused" {
+					if status, _, _ := call(t, s, "POST", "/api/groups/"+group+"/marketing/resume", token, ""); status != 200 {
+						t.Fatalf("resume after cancellation %d", status)
+					}
+				}
 			})
 		}
 	}

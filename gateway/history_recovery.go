@@ -18,6 +18,9 @@ func (s *Service) recoveryHTTP(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]any{"recovery": g.Recovery})
 }
 func (a *TelegramAdapter) recordSDKRange(aid string, u tg.UpdatesClass) {
+	if a.service.state.Accounts[aid] == nil {
+		return
+	}
 	var list []tg.UpdateClass
 	switch v := u.(type) {
 	case *tg.Updates:
@@ -58,6 +61,9 @@ func (a *TelegramAdapter) noteChannelGap(aid string, cid int64) {
 	s := a.service
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.state.Accounts[aid] == nil || s.ctx.Err() != nil {
+		return
+	}
 	g := s.state.Groups["tg-"+stringID(cid)]
 	if g == nil {
 		return
@@ -83,7 +89,7 @@ func (a *TelegramAdapter) recoverChannelRange(parent context.Context, aid string
 	gid := "tg-" + stringID(channel.ChannelID)
 	s.mu.Lock()
 	g := s.state.Groups[gid]
-	if g == nil {
+	if g == nil || s.state.Accounts[aid] == nil {
 		s.mu.Unlock()
 		return nil
 	}

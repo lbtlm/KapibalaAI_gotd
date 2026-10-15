@@ -1,5 +1,15 @@
 # Development status
 
+> **R34 文档收尾**：入口重整为 [README](../README.md)、[启动指南](getting-started.md) 和 [验收指南](acceptance-guide.md)，参考用户 open-jarvis README 的导航、折叠详情与验证边界结构。加入 6 张用户授权展示的本地测试页面截图；截图只读、群保持暂停，没有发送或模型调用。图片来源和版本见 [图片索引](images/README.md)。
+>
+> 最新业务基线 `e36d699` 的 [light CI](https://github.com/lbtlm/KapibalaAI_gotd/actions/runs/38767836550) 已通过。本地 backend 已更新且 `/api/health` 为 ok / schema12，gateway 保持原容器运行。文档收尾只核验链接、格式、截图与命令，不重跑业务测试；当前差距仍以要求审计为准。继续沿用 issue #4 / PR #5，不合并或发布。
+
+> **R33 当前状态**：主控独立补关键异常测试并修复无队列限流到期；完整剩余项以 [当前要求审计](requirements-audit.md) 为准。历史“无阻塞/已全部验收”只适用于当时范围，不适用于当前未验证窗口。
+
+> **C1/C3 更新（2026-10-15 晚间）**：本次已补媒体下载/展示/保留清理，并新增只读已有群 C3（实际通过）。历史未实现/模拟 C3 记录以 [当前接口与流程覆盖表](api-flow-coverage.md) 和 R32 TDD 为准。
+
+> **当前范围覆盖历史记录（2026-10-15，账号巡检 Revision 5）：** 用户明确要求移除账号/网关模拟模块及相关测试替身。历史 fake/C3/故障注入通过记录仅证明原版本，不再是当前覆盖。新库为空、正常上传 Session+JSON、真实连接检测与同步群；当前验证以 [账号巡检记录](account-inspection-20261015.md) 及组件 TDD 的 N19/O19/I19 结果为准。删除的测试不计通过，未重新实测的外部失败与恢复场景保持未验证。
+
 Observed 2026-10-15 01:34 Asia/Shanghai. Coordination record; acceptance boundaries are recorded in the acceptance matrix. Final commit-level automation is authoritative in the delivery PR's latest CI Gate.
 
 | Employee / assignment | Runtime ID | Scope | Requested runtime | Status |

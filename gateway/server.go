@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -12,20 +13,11 @@ import (
 	"time"
 )
 
-// Config selects a transport and an explicitly enabled fake control API.
+// Config configures the real Telegram gateway and its durable store.
 type Config struct {
-	Mode         string
-	AdminEnabled bool
-	Store        Store
-	Telegram     Adapter
-}
-
-// Adapter translates real platform operations; fake operations run in the same handler.
-type Adapter interface {
-	Connect(context.Context, string) (string, error)
-	Disconnect(context.Context, string) error
-	Execute(context.Context, string, string, input, *Service) (any, error)
-	Close() error
+	Mode     string
+	Store    *PostgresStore
+	Telegram *TelegramAdapter
 }
 
 // APIError preserves only the stable public gateway error.
@@ -38,6 +30,7 @@ type APIError struct {
 func (e *APIError) Error() string { return e.Code }
 
 type input struct {
+	GroupID          string   `json:"groupId"`
 	AccountID        string   `json:"accountId"`
 	CreatorAccountID string   `json:"creatorAccountId"`
 	ByAccountID      string   `json:"byAccountId"`
@@ -47,6 +40,7 @@ type input struct {
 	Text             string   `json:"text"`
 	IdempotencyKey   string   `json:"idempotencyKey"`
 	Username         string   `json:"username"`
+	Title            string   `json:"title"`
 	AccountIDs       []string `json:"accountIds"`
 }
 
@@ -54,7 +48,7 @@ type input struct {
 type Service struct {
 	mu     sync.Mutex
 	state  state
-	store  Store
+	store  *PostgresStore
 	cfg    Config
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -62,15 +56,16 @@ type Service struct {
 	mux    *http.ServeMux
 }
 
-// New reconstructs state before starting durable delayed fake effects.
+// New reconstructs real account state before resuming managed connections.
 func New(parent context.Context, c Config) (*Service, error) {
 	if c.Store == nil {
 		return nil, errors.New("gateway store required")
 	}
-	if c.Mode != "fake" && c.Mode != "telegram" {
-		return nil, errors.New("GATEWAY_MODE must be fake or telegram")
+	if c.Mode != "" && c.Mode != "telegram" {
+		return nil, errors.New("GATEWAY_MODE must be telegram; simulation is no longer supported")
 	}
-	if c.Mode == "telegram" && c.Telegram == nil {
+	c.Mode = "telegram"
+	if c.Telegram == nil {
 		return nil, errors.New("telegram adapter required")
 	}
 	ctx, cancel := context.WithCancel(parent)
@@ -86,13 +81,28 @@ func New(parent context.Context, c Config) (*Service, error) {
 			return nil, err
 		}
 	}
-	if s.state.Mode != "" && s.state.Mode != c.Mode {
+	if len(b) > 0 && s.state.Mode != "telegram" {
 		cancel()
-		return nil, errors.New("gateway database mode differs from GATEWAY_MODE; use separate databases")
+		return nil, errors.New("gateway database has legacy or unknown provenance; preserve it and reupload credentials to a real gateway database")
 	}
 	s.state.Mode = c.Mode
-	if binder, ok := c.Telegram.(interface{ Bind(*Service) }); ok {
-		binder.Bind(s)
+	// Pre-generation online snapshots have no incarnation shared with the backend.
+	// Persist offline before Resume; only a later explicit connect may assign an ID.
+	orphaned := 0
+	for id, account := range s.state.Accounts {
+		if account.Status == "online" && account.ConnectionID == "" {
+			account.Status = "offline"
+		}
+		if s.finishFailedConnection(id, account.ConnectionID) {
+			orphaned++
+		}
+	}
+	if orphaned != 0 {
+		slog.Info("ended orphaned Telegram connection intents", "count", orphaned)
+	}
+	if err = c.Telegram.Bind(s); err != nil {
+		cancel()
+		return nil, err
 	}
 	if s.state.CreateKeys == nil {
 		s.state.CreateKeys = map[string]string{}
@@ -105,6 +115,12 @@ func New(parent context.Context, c Config) (*Service, error) {
 		respond(w, 200, map[string]string{"status": "ok", "mode": c.Mode})
 	})
 	s.mux.HandleFunc("POST /accounts/{accountId}/{operation}", s.accountHTTP)
+	s.mux.HandleFunc("POST /accounts/register", s.registerHTTP)
+	s.mux.HandleFunc("DELETE /accounts/{accountId}", s.deleteAccountHTTP)
+	s.mux.HandleFunc("GET /accounts/{accountId}/registration", s.registrationHTTP)
+	s.mux.HandleFunc("POST /accounts/{accountId}/check", s.inspectHTTP)
+	s.mux.HandleFunc("POST /accounts/{accountId}/join", s.inspectHTTP)
+	s.mux.HandleFunc("GET /accounts/{accountId}/joined-groups", s.inspectHTTP)
 	s.mux.HandleFunc("POST /groups", s.groupHTTP)
 	s.mux.HandleFunc("POST /groups/import", s.importHTTP)
 	s.mux.HandleFunc("POST /groups/{groupId}/{operation}", s.groupHTTP)
@@ -112,25 +128,12 @@ func New(parent context.Context, c Config) (*Service, error) {
 	s.mux.HandleFunc("GET /groups/{groupId}/recovery", s.recoveryHTTP)
 	s.mux.HandleFunc("GET /groups/{groupId}/messages/by-client-id/{clientMsgId}", s.queryHTTP)
 	s.mux.HandleFunc("GET /events", s.eventsHTTP)
-	s.mux.HandleFunc("GET /media/{id}", func(w http.ResponseWriter, r *http.Request) { fail(w, &APIError{404, "MEDIA_EXPIRED", 0}) })
-	if c.Mode == "fake" && c.AdminEnabled {
-		s.mux.HandleFunc("POST /admin/{operation}", s.adminHTTP)
-	}
+	s.mux.HandleFunc("GET /media/{id}", c.Telegram.mediaHTTP)
+	c.Telegram.Resume(s)
 	s.wg.Add(1)
-	go s.runJobs()
-	if a, ok := c.Telegram.(interface{ Resume(*Service) }); ok {
-		a.Resume(s)
-	}
-	if a, ok := c.Telegram.(interface {
-		RecoverEffects(context.Context, string) error
-	}); ok {
-		s.wg.Add(1)
-		go s.runSendRecovery(a)
-	}
-	if checker, ok := c.Store.(interface{ CheckLease(context.Context) error }); ok {
-		s.wg.Add(1)
-		go s.watchLease(checker)
-	}
+	go s.runSendRecovery(c.Telegram)
+	s.wg.Add(1)
+	go s.watchLease()
 	return s, nil
 }
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -154,16 +157,16 @@ func (s *Service) operationContext(parent context.Context) (context.Context, fun
 	if s.ctx.Err() != nil {
 		return nil, func() {}, ErrWriterLeaseLost
 	}
-	if checker, ok := s.store.(interface{ CheckLease(context.Context) error }); ok {
-		leaseCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), 2*time.Second)
-		stopLease := context.AfterFunc(s.ctx, cancel)
-		err := checker.CheckLease(leaseCtx)
-		stopLease()
-		cancel()
-		if err != nil {
+	leaseCtx, leaseCancel := context.WithTimeout(context.WithoutCancel(parent), 2*time.Second)
+	stopLease := context.AfterFunc(s.ctx, leaseCancel)
+	err := s.store.CheckLease(leaseCtx)
+	stopLease()
+	leaseCancel()
+	if err != nil {
+		if errors.Is(err, ErrWriterLeaseLost) {
 			s.cancel()
-			return nil, func() {}, err
 		}
+		return nil, func() {}, err
 	}
 	if err := parent.Err(); err != nil {
 		return nil, func() {}, err
@@ -177,7 +180,7 @@ func (s *Service) operationContext(parent context.Context) (context.Context, fun
 	}
 	return ctx, func() { stop(); cancel() }, nil
 }
-func (s *Service) watchLease(checker interface{ CheckLease(context.Context) error }) {
+func (s *Service) watchLease() {
 	defer s.wg.Done()
 	tick := time.NewTicker(250 * time.Millisecond)
 	defer tick.Stop()
@@ -187,9 +190,9 @@ func (s *Service) watchLease(checker interface{ CheckLease(context.Context) erro
 			return
 		case <-tick.C:
 			ctx, cancel := context.WithTimeout(s.ctx, 2*time.Second)
-			err := checker.CheckLease(ctx)
+			err := s.store.CheckLease(ctx)
 			cancel()
-			if err != nil {
+			if errors.Is(err, ErrWriterLeaseLost) {
 				s.cancel()
 				return
 			}
@@ -246,31 +249,6 @@ func (s *Service) accountError(id string, online bool) error {
 	}
 	return nil
 }
-func (s *Service) consumeFault(op, accountID, groupID string) *Fault {
-	for i := range s.state.Faults {
-		f := &s.state.Faults[i]
-		if f.Count == 0 || (f.Operation != "any" && f.Operation != op) || (f.AccountID != "" && f.AccountID != accountID) || (f.GroupID != "" && f.GroupID != groupID) {
-			continue
-		}
-		v := *f
-		if f.Count > 0 {
-			f.Count--
-		}
-		return &v
-	}
-	return nil
-}
-func faultError(f *Fault) error {
-	if f == nil {
-		return nil
-	}
-	codes := map[string]int{"NETWORK_TIMEOUT": 504, "GATEWAY_UNAVAILABLE": 503, "SERVICE_UNAVAILABLE": 503, "RATE_LIMITED": 429, "ACCOUNT_SUSPENDED": 403, "SESSION_EXPIRED": 401, "GROUP_WRITE_FORBIDDEN": 403, "SENDER_NOT_IN_GROUP": 403, "INVITE_NOT_READY": 409, "INVITE_EXPIRED": 410, "ALREADY_MEMBER": 409, "NOT_MEMBER_YET": 409, "OWNER_LEFT": 409, "NO_PERMISSION": 403, "LEAVE_FAILED": 500}
-	status := codes[f.Code]
-	if status == 0 {
-		status = 503
-	}
-	return &APIError{status, f.Code, f.RetryAfterSeconds}
-}
 func (s *Service) commitHTTP(w http.ResponseWriter, r *http.Request, status int, v any, err error) {
 	if e := s.save(r.Context()); e != nil {
 		fail(w, e)
@@ -292,64 +270,111 @@ func (s *Service) accountHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer stop()
-	if err := s.accountError(id, false); err != nil {
+	if err := s.store.CheckAccountRetired(opCtx, id); err != nil {
 		fail(w, err)
 		return
 	}
-	if f := s.consumeFault(op, id, ""); f != nil {
-		if f.Code == "ACCOUNT_SUSPENDED" {
-			s.terminal(id, "suspended")
-		}
-		if f.Code == "SESSION_EXPIRED" {
-			s.terminal(id, "session_expired")
-		}
-		s.commitHTTP(w, r, 0, nil, faultError(f))
+	if err := s.accountError(id, false); err != nil {
+		fail(w, err)
 		return
 	}
 	a := s.state.Accounts[id]
 	switch op {
 	case "connect":
-		if s.cfg.Telegram != nil {
-			s.mu.Unlock()
-			pid, e := s.cfg.Telegram.Connect(opCtx, id)
-			s.mu.Lock()
-			if err := opCtx.Err(); err != nil {
-				fail(w, err)
-				return
-			}
-			if e != nil {
-				s.commitHTTP(w, r, 0, nil, s.accountFailure(id, e))
-				return
-			}
-			if err := s.accountError(id, false); err != nil {
-				s.commitHTTP(w, r, 0, nil, err)
-				return
-			}
-			a = s.state.Accounts[id]
-			a.PlatformID = pid
+		var request struct {
+			ConnectionID string `json:"connectionId"`
 		}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+		decoder.DisallowUnknownFields()
+		if e := decoder.Decode(&request); e != nil && !errors.Is(e, io.EOF) || len(request.ConnectionID) > 128 {
+			fail(w, &APIError{400, "INVALID_INPUT", 0})
+			return
+		}
+		if request.ConnectionID == "" {
+			request.ConnectionID = a.ConnectionID
+			if request.ConnectionID == "" {
+				nonce, err := randomID()
+				if err != nil {
+					fail(w, err)
+					return
+				}
+				request.ConnectionID = "legacy-" + stringID(nonce)
+			}
+		}
+		if request.ConnectionID != "" && a.EndedConnections[request.ConnectionID] {
+			fail(w, &APIError{409, "CONNECTION_ENDED", 0})
+			return
+		}
+		if a.ConnectionID != "" && a.ConnectionID != request.ConnectionID {
+			fail(w, &APIError{409, "CONNECTION_CONFLICT", 0})
+			return
+		}
+		if a.ConnectionID != request.ConnectionID {
+			a.ConnectionID = request.ConnectionID
+			if e := s.save(opCtx); e != nil {
+				fail(w, e)
+				return
+			}
+		}
+		opCtx = context.WithValue(opCtx, connectionIDKey{}, request.ConnectionID)
+		s.mu.Unlock()
+		pid, e := s.cfg.Telegram.Connect(opCtx, id)
+		s.mu.Lock()
+		if err := opCtx.Err(); err != nil {
+			if e != nil && failedConnectionStopped(e) {
+				if cleanupErr := s.persistFailedConnection(id, request.ConnectionID); cleanupErr != nil {
+					fail(w, cleanupErr)
+					return
+				}
+			}
+			fail(w, err)
+			return
+		}
+		if err := s.accountError(id, false); err != nil {
+			s.commitHTTP(w, r, 0, nil, err)
+			return
+		}
+		if current := s.state.Accounts[id]; current.ConnectionID != request.ConnectionID || request.ConnectionID != "" && current.EndedConnections[request.ConnectionID] {
+			fail(w, &APIError{409, "CONNECTION_ENDED", 0})
+			return
+		}
+		if e != nil {
+			failure := s.accountFailure(id, e)
+			if failedConnectionStopped(e) {
+				s.finishFailedConnection(id, request.ConnectionID)
+			}
+			s.commitHTTP(w, r, 0, nil, failure)
+			return
+		}
+		a = s.state.Accounts[id]
+		a.PlatformID = pid
 		a.Status = "online"
-		s.commitHTTP(w, r, 200, map[string]string{"platformUserId": a.PlatformID}, nil)
+		s.commitHTTP(w, r, 200, map[string]string{"platformUserId": a.PlatformID, "connectionId": a.ConnectionID}, nil)
 	case "disconnect":
-		if s.cfg.Telegram != nil {
-			s.mu.Unlock()
-			e := s.cfg.Telegram.Disconnect(opCtx, id)
-			s.mu.Lock()
-			if err := opCtx.Err(); err != nil {
-				fail(w, err)
-				return
-			}
-			if e != nil {
-				s.commitHTTP(w, r, 0, nil, s.accountFailure(id, e))
-				return
-			}
-			if err := s.accountError(id, false); err != nil {
-				s.commitHTTP(w, r, 0, nil, err)
-				return
-			}
-			a = s.state.Accounts[id]
+		connectionID := a.ConnectionID
+		opCtx = context.WithValue(opCtx, connectionIDKey{}, connectionID)
+		s.mu.Unlock()
+		e := s.cfg.Telegram.Disconnect(opCtx, id)
+		s.mu.Lock()
+		if err := opCtx.Err(); err != nil {
+			fail(w, err)
+			return
 		}
+		if err := s.accountError(id, false); err != nil {
+			s.commitHTTP(w, r, 0, nil, err)
+			return
+		}
+		if s.state.Accounts[id].ConnectionID != connectionID {
+			fail(w, &APIError{409, "CONNECTION_ENDED", 0})
+			return
+		}
+		if e != nil {
+			s.commitHTTP(w, r, 0, nil, s.accountFailure(id, e))
+			return
+		}
+		a = s.state.Accounts[id]
 		a.Status = "offline"
+		s.endConnection(a)
 		s.commitHTTP(w, r, 200, map[string]any{}, nil)
 	default:
 		fail(w, &APIError{404, "NOT_FOUND", 0})
@@ -359,10 +384,6 @@ func (s *Service) queryHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	gid, cid := r.PathValue("groupId"), r.PathValue("clientMsgId")
-	if f := s.consumeFault("query", "", gid); f != nil {
-		s.commitHTTP(w, r, 0, nil, faultError(f))
-		return
-	}
 	var earliest *message
 	for i := range s.state.Messages {
 		m := &s.state.Messages[i]
@@ -387,12 +408,10 @@ func (s *Service) queryHTTP(w http.ResponseWriter, r *http.Request) {
 		respond(w, 200, map[string]any{"msgId": earliest.MsgID, "sentAt": earliest.SentAt})
 		return
 	}
-	if s.cfg.Mode == "telegram" {
-		for _, e := range s.state.Effects {
-			if e.GroupID == gid && e.ClientID == cid && e.State != "sent" && e.State != "failed" {
-				fail(w, &APIError{504, "NETWORK_TIMEOUT", 0})
-				return
-			}
+	for _, e := range s.state.Effects {
+		if e.GroupID == gid && e.ClientID == cid && e.State != "sent" && e.State != "failed" {
+			fail(w, &APIError{504, "NETWORK_TIMEOUT", 0})
+			return
 		}
 	}
 	fail(w, &APIError{404, "MESSAGE_NOT_FOUND", 0})

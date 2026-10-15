@@ -11,27 +11,28 @@ pnpm test
 pnpm build
 ```
 
-预置账号 admin/admin 与 viewer/viewer 仅用于演示。viewer 不显示写操作，服务器仍须强制鉴权。群列表支持新建群和导入指定既有测试群，外部群主时不假设 creatorAccountId 有值。
+预置 Web 登录 admin/admin 与 viewer/viewer 仅用于本地验收。新环境没有 Telegram 账号；管理员上传真实账号的同名 Telethon SQLite `.session` 与 `.json` 后，再显式连接并检测。打开详情只读取已有资料；同步所在群需要账号在线，不会自动托管群组或启用 AI。viewer 只读取，服务器强制鉴权。
 
-## 真实栈 E2E
+## 验证边界
 
-`pnpm test` 只证明 REST/WS 与组件合同。MSW 仅模拟浏览器之外的 HTTP，WS 测试仅替换网络 Socket；两者不能证明 PostgreSQL、网关和 Agent 的完整运行。
+`pnpm test` 保留认证客户端与登录、通用 WS 游标、Agent 展示测试，以及真实核验来源的类型契约。认证与 Agent 使用它们自己的公共 HTTP 测试边界；通用 WS 测试仅覆盖认证和游标，不构造 Telegram 事件。账号、群与网关的 HTTP/route/RPC 测试替身、合成 Session 成功路径和相关浏览器用例已删除。删除覆盖不能计作通过。
 
-`pnpm test:e2e` 使用真实 API，没有 route/mock 拦截。C3 会连接两个 fake 账号、创建群、开启 Agent、向 fake 网关注入一条外部消息，再通过浏览器登录和进入群，核验 Agent 运行步骤。另一个用例验证 viewer 无写按钮且直调写 API 得到 403。B4 用例只在 WebSocket 传输层断线，向真实 fake 网关注入三条消息；恢复后严格三秒内全部可见，第二次实际重连后每条仍只出现一次。仅用于隔离测试数据库，不能指向真实 Telegram 网关。
+`e2e/empty-system.spec.ts` 使用实际前后端及真实空数据库，不拦截业务响应。覆盖登录、实际空账号数组、真实文件上传引导、三个桌面宽度，以及 viewer 写入得到 403。不上传文件、不创建账号、不连接 Telegram。`e2e/auth-cookies.spec.ts` 独立验证无关的浏览器 HttpOnly 认证边界。
 
-先准备隔离 PostgreSQL 并启动以下进程（root 栈脚本由集成负责人提供）：
+## 真实空系统浏览器验收
 
-- backend: DATABASE_URL 指向隔离库；先 `go run ./cmd/migrate`，再 `go run ./cmd/server`（8080）。
-- gateway: 同一个隔离库、`GATEWAY_MODE=fake`、`GATEWAY_ADMIN_ENABLED=true`，`go run ./cmd/gateway`（8081）。
-- Agent: `AGENT_MODE=scripted`，`go run ./cmd/agent`（8082）。
+先准备两个独立、专用于验收的空 PostgreSQL 数据库，分别设置 `E2E_DATABASE_URL` 和 `E2E_GATEWAY_DATABASE_URL`。仓库根目录的 `scripts/local-stack.mjs` 负责真实服务启动与迁移；不得指向已有账号或人工验收环境。
 
 ```powershell
 cd D:\web_projects\kapibala_ai\frontend
+# 先在本终端设置上述两个隔离数据库 URL。
+$env:E2E_STACK_COMMAND = 'node scripts/local-stack.mjs'
+$env:E2E_BASE_URL = 'http://127.0.0.1:15173'
+$env:E2E_API_URL = 'http://127.0.0.1:18080'
 pnpm exec playwright install chromium
-pnpm test:e2e
+pnpm exec playwright test e2e/empty-system.spec.ts
 ```
 
-可设置 `E2E_STACK_COMMAND` 为仓库根目录的栈启动命令；Playwright 会执行它并等待后端 health，然后启动 Vite。未设置则要求后端栈已经启动，不会以 mocks 代替。CI 应由 Rowan 的根脚本提供 PostgreSQL、迁移与三服务。配置支持 `E2E_API_URL`、`E2E_GATEWAY_URL`、`E2E_BASE_URL`。Vite 启动端口与 `E2E_BASE_URL` 的端口一致；独立测试栈同时设置 `VITE_BACKEND_URL` 指向该测试后端，避免使用正在人工验收的服务。本机有 Edge 时可设置 `E2E_BROWSER_CHANNEL=msedge`，CI 使用安装好的 Chromium。
+Playwright 等待后端 health，再由 Vite 将 `/api`、`/ws` 代理到 `E2E_API_URL`。未设置启动命令时，要求真实后端已经启动。浏览器测试默认使用 15173/18080；不使用正在人工验收的 5173。本机可设置 `E2E_BROWSER_CHANNEL=msedge`，CI 使用 Chromium。截图与附加证据写入 Playwright 标准 artifact 目录，不依赖预建的本地文件夹。
 
-首次交接状态：前端构建与组件测试通过；真实栈 E2E 等待集成栈启动后运行。不会将未启动服务下的失败报告为验收通过。
-
+空系统通过不证明真实 Session 导入、连接、资料查询、群同步、消息发送或 Telegram 故障恢复。真实账号验收由主控使用指定资源单独授权；只读 UI 验收仅记录脱敏布尔、计数和样式，不将真实身份、群资料或凭据写入 Git/CI artifact。当前没有替身覆盖的限流、同步失败缓存、迟到结果和断线窗口等实际故障，必须如实标为未验证。

@@ -26,13 +26,11 @@ func TestActualSixtySecondBudgetStopsSlowLegalTurnsAndRecordsInterruptedTurn(t *
 		fmt.Fprintf(w, `{"stop_reason":"tool_use","content":[{"type":"tool_use","id":"read-%d","name":"get_recent_messages","input":{"limit":10}}]}`, len(in.Messages))
 	}))
 	defer agent.Close()
-	g := gatewayFixture(t)
-	a, s := fixture(t, platform.Config{GatewayURL: g.server.URL, AgentURL: agent.URL})
+	a, s, cfg := fixtureConfig(t, platform.Config{AgentURL: agent.URL})
+	group := insertAgentInput(t, cfg)
 	a.Start(context.Background())
 	token, _ := login(t, s, "admin")
-	group := createGroup(t, s, token)
-	call(t, s, "PATCH", "/api/groups/"+group, token, `{"agentEnabled":true}`)
-	g.event("message", map[string]any{"groupId": "gateway-group", "msgId": "budget-trigger", "senderPlatformUserId": "outside", "text": "trigger", "sentAt": time.Now().UTC().Format(time.RFC3339Nano)})
+
 	eventually(t, 3*time.Second, func() bool { return len(runList(t, s, token, group)) == 1 })
 	created := time.Now()
 	var id string
@@ -59,7 +57,6 @@ func TestActualSixtySecondBudgetStopsSlowLegalTurnsAndRecordsInterruptedTurn(t *
 func TestHalfSecondHardDowntimeDoesNotSpendBudgetUnlessPeerRemainsOnline(t *testing.T) {
 	for _, peerOnline := range []bool{false, true} {
 		t.Run(fmt.Sprintf("peer=%v", peerOnline), func(t *testing.T) {
-			g := gatewayFixture(t)
 			entered := make(chan struct{}, 1)
 			var turns atomic.Int32
 			agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +79,8 @@ func TestHalfSecondHardDowntimeDoesNotSpendBudgetUnlessPeerRemainsOnline(t *test
 				fmt.Fprint(w, `{"stop_reason":"end_turn","content":[{"type":"text","text":"resumed within remaining online budget"}]}`)
 			}))
 			defer agent.Close()
-			a, _, cfg := fixtureConfig(t, platform.Config{GatewayURL: g.server.URL, AgentURL: agent.URL})
+			a, _, cfg := fixtureConfig(t, platform.Config{AgentURL: agent.URL})
+			group := insertAgentInput(t, cfg)
 			a.Close()
 			cmd, server := childServer(t, cfg)
 			alive := true
@@ -93,9 +91,7 @@ func TestHalfSecondHardDowntimeDoesNotSpendBudgetUnlessPeerRemainsOnline(t *test
 				}
 			}()
 			token, _ := login(t, server, "admin")
-			group := createGroup(t, server, token)
-			call(t, server, "PATCH", "/api/groups/"+group, token, `{"agentEnabled":true}`)
-			g.event("message", map[string]any{"groupId": "gateway-group", "msgId": "near-budget", "senderPlatformUserId": "outside", "text": "trigger", "sentAt": time.Now().UTC().Format(time.RFC3339Nano)})
+
 			select {
 			case <-entered:
 			case <-time.After(4 * time.Second):

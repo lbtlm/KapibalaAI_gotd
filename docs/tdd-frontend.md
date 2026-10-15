@@ -1,5 +1,7 @@
 # 前端测试与交接证据
 
+当前验收策略以文末 I19 和账号契约 Revision 5 为准。下列 F1–I18 记录是历史证据；其中账号/群网关替身、合成 Session、模拟栈、展示 route 和 C3/B4 注入测试均已退役，不能作为当前真实平台行为的通过证据或运行指南。
+
 Iris · 前端工程师，F1 attempt1 revision1；模型/强度按主控显式 Sol High 派发，Fast未独立核验。所有代码仅frontend与授权root忽略文件/本记录；未checkout/commit/push，遵守feat/*经PR至dev再main。
 
 已批准seams：用户操作/REST/WS。Testing Library以用户可见页面、表单和按钮为入口；MSW只替代浏览器外HTTP边界，没有mock项目内部模块。Socket仅在网络边界替换。测试无数据库侧通道。
@@ -108,3 +110,190 @@ PR #3 CI `38673104348` frontend 首轮 24 passed / 1 failed；R1→WS R2 用例�
 主控在固定 `3c5192b` 独立复核完成后解除指定测试/TDD 冻结。仅该状态测试建立 R1 的两次按钮操作改为已有 aria-label 查询、明确等待预检按钮 enabled，并用 fireEvent.click；确认按钮仍断言 enabled。真实 UI→HTTP 启动与本地 runId、全部 WS 帧、R1/R2 完成和保留断言均保留。复用现有 fireEvent/waitFor，无新增模块或依赖；替换旧两次完整 pointer/focus 设置流程。独立预检确认测试继续使用 userEvent。未提高测试 timeout、未修改生产逻辑或 B4 三秒阈值，也未制造生产 red。
 
 原配置验证：`pnpm exec vitest run src/pages/Sequences.test.tsx -t R1 --reporter verbose` exit 0，1 passed，1941 ms（`a2/r2-focused.log`）；`pnpm exec vitest run src/pages/Sequences.test.tsx src/api/realtime.test.ts` exit 0，8 passed，该状态用例 1700 ms（`a2/r2-affected.log`）；`pnpm typecheck` exit 0（`a2/r2-typecheck.log`）。日志均位于 `.local/repairs-20261015/iris/`。仅测试和文档改变，按授权不重复生产 build 或 B4/完整套件。远端 CI 与最终验收由主控完成；本次提交为 SUBMITTED。
+
+## F16 attempt1 revision1：账号管理（2026-10-15）
+
+Iris · 前端工程师。按 account-inspection-20261015.md revision3 冻结契约，沿用已批准 AntD 方向；只写 frontend 与所属文档。先 CodeGraph 定位 Accounts/AccountTableColumns/MainLayout/api 调用链；主控报告 auto-sync 锁竞争停止后，对编辑文件直接核对磁盘。已读 interface-design、TDD、tests/mocking、实现合同及规范 A1/UI；公共 seam 沿用批准的浏览器 UI、HTTP、WS。未操作真实账号、切分支、commit/push 或部署。
+
+| 切片 | 实际 red | 实现及 green |
+|---|---|---|
+| 完整身份与搜索 | `pnpm exec vitest run src/pages/Accounts.test.tsx -t '账号管理完整'`：旧界面找不到“账号管理”，缺完整手机号与搜索，search-red.log | 账号表格原位扩列、手机号复制、用户名/手机号/ID 搜索、实际计数、分组/状态筛选、分页；搜索行为在 search-green.log 已绿（当次文件的旧合法按钮测试因 role 查询耗时失败，未把整次记绿）。 |
+| 详情只读 | `... -t '详情打开'`：旧详情按钮不打开 Modal，details-red.log | 1080px Modal 三标签；仅读 account/cached groups/logs；viewer无写入口、离线提示连接、unknown独立角色。后续 management-unit.log 该项绿。 |
+| 多文件配对 | `... -t '多账号上传'`：旧上传入口没有 Modal，import-red.log | 原生多选文件+AntD预览表；缺失/重复/不支持文件阻止提交，多组完整才启用；account-unit-final.log 配对项绿。真实 multipart 与逐项结果留真实浏览器，不以 jsdom/MSW 替代。 |
+| 分组 CRUD | `... -t '管理员创建'`：旧界面无管理入口，groups-red.log | 创建/原位重命名/确认删除，保留账号提示与失败输入。首次测试删除后等待了已存在文字，定向修正为等待目标行移除；后来组合因无关六账号表格反复重绘触发15s超时，缩小该测试为无账号列表，保留全部CRUD和HTTP断言、未提高timeout，groups-isolated-green.log 4820ms。 |
+| 补充关键边界 | 新增 HTTP/UI seam 覆盖，不伪造额外生产 red | 显式连接check=true、在线check=false、模拟来源未核验、同步失败保留缓存/creator角色、批移403保留选择/目标与重试；check-sync-green.log 定向项绿。 |
+
+AntD NODE_ENV=test 的 useId 固定为 test-id，使多个 Select 与 Modal aria-labelledby 撞 ID；测试按 dialog 查询，再在其中断言内容，未以生产 hack 绕过。Axios/jsdom/MSW 对 multipart 文件体解析未完成，最初结果断言挂起；改为 unit 只验证配对，浏览器实际 HTTP 上传验证真实 FormData。ApiClient 无手写 Content-Type，当前 Axios 在标准浏览器对 FormData 清除 Content-Type，由浏览器生成 boundary；E2E 将断言实际请求头，不读凭据内容。
+
+布局浏览器：`E2E_BASE_URL=http://127.0.0.1:15173 E2E_BROWSER_CHANNEL=msedge pnpm exec playwright test e2e/accounts-layout.spec.ts`，layout-green.log 1 passed / 5.4s。61条合成 HTTP 展示数据、1366/1920/2560×900，验证 account content 右边界、无页面横溢、内部滚动、分页留在视口内、切页和搜索回页1；截图 accounts-{1366,1920,2560}.png，已看图1366与2560。首次展示路由通配符误拦 Vite 的 src/api/client.ts 模块，范围改为 URL.pathname 以 /api/ 开头后绿；属于测试夹具，不是产品红。后续加分组/状态组合筛选断言，待组合浏览器一起验证。
+
+`pnpm typecheck`（含新增 Node22 SQLite E2E）通过，typecheck-with-e2e.log；最终生产 `pnpm build` 通过，3258 modules，7.64s，build-stable.log；旧 AntD >500kB chunk 提示保留，不扩展优化范围。实际 Telegram/LLM、远端CI与主控最终验收不由这些本地结果证明。
+
+### 最终验证与审查后收敛
+
+最终受影响组合 `pnpm exec vitest run src/pages/Accounts.test.tsx src/api/realtime.test.ts --reporter verbose`，2 files / 10 passed，35.97s；分组CRUD 7274ms。证据 affected-stable.log。主控 Sentry 首轮未发现前端产品阻塞；随后唯一新增生产改动是按主控指示为 upgrade_disconnect 日志动作加“升级后断开连接”标签/筛选。`pnpm build`（含 tsc）再次通过，3258 modules、6.22s，build-review-mapping.log；未为静态映射增加镜像单测，未重复已通过unit。
+
+真实浏览器新账号用例最终 `pnpm exec playwright test e2e/accounts.spec.ts --grep '配对导入' --reporter=list --output=../.local/inspection-20261015/iris/account-capture-results`，1 passed / 16.0s（用例11.2s），account-capture.log。真实 PG、backend、持久 fake gateway、scripted Agent；Node22内置SQLite临时生成两个独立合成授权与一份无效Session，测试finally删除文件。实际浏览器multipart含自动boundary，2成功/1 INVALID_SESSION逐结果；完整手机号/分组→明确连接并检测→模拟来源且未核验手机号→只读详情和导入/连接/检测日志→完整creator群快照→重复导入明确错误→批移未分组→删组仍保留账号，全部通过；读取详情/日志未产生连接或同步POST，群同步前后托管群清单及AI开关一致。
+
+新layout 1 passed / 1.7s，新增viewer 1 passed / 1.5s，复用 accounts-focused.log 对这两项的通过证据。layout包含三桌面宽度、内滚动、分页、搜索回页1、分组30条与叠加在线10条，统计仍61。最初集中测试停于隐藏AntD虚拟option，改点可见option-content后绿；账号流程后续定位假设分别是zhCN关闭按钮并非英文Close、has内层错误包含modal根。均经trace/页面快照确认后只修测试定位，未改变产品/timeout；已知等待主动停止。最终四截图使用 animations:'disabled'，避免过渡帧误作视觉证据。
+
+既有真实栈 `pnpm exec playwright test e2e/platform.spec.ts --reporter=list --output=../.local/inspection-20261015/iris/platform-results`，3 passed / 18.4s（C3/viewer/B4），platform-stable.log。B4从恢复184.971ms、认证后100.555ms，三条各一行，seq16/17/18，第二重连cursor18保持唯一；没有重跑已通过platform。
+
+本轮服务端口18080/18081/18082，Vite15173，DSN由忽略的test-environment.json提供，未使用5173 demo。截图已逐图看过：.local/inspection-20261015/iris/actual-upload.png、actual-details.png、actual-groups.png、actual-logs.png；都是隔离真实栈加合成数据，不是Telegram真实账号/真实LLM证据。旧fake-stack session72771保留供主控审查修复后的定向健康/限流/升级联调，主控确认后清理；新二进制修复的联调尚不由上述旧服务结果证明。源码和文档完成后冻结，SUBMITTED待主控最终验收。
+
+## I18：日志结果 Tag 与所属群空态（2026-10-15）
+
+Iris · 前端工程师，沿用 Sol High，Fast未暴露。范围仅 AccountDetails、StatusTag、受影响UI测试及本轮TDD/reuse记录；共享仓库不回退他人修改，无分支/提交/push、递归委派或5173账号写请求。先经CodeGraph定位现有调用链，按当前磁盘和账号契约revision4实施。API、缓存更新和连接权限均不变。
+
+根因1：日志单独使用 AntD6 默认 filled Tag 的 success/error 状态色，现有深色 colorSuccess/colorError 经主题派生的背景偏灰；没有全局Tag覆盖或opacity问题。原生产构建成功文字/背景 rgb(45,97,80)/rgb(151,161,156)，对比度2.687；失败4.455，opacity均1。修复复用现有 StatusTag Positive/Danger 的明确浅底/深字，仅增加 success→成功映射；不改主题或CSS、不保留旧结果渲染路径。新构建成功对比度6.400、失败6.266，两者分别绿/红且文字完整。
+
+根因2：所在群空表无条件使用“尚无成功同步的群组快照”，忽略 lastSyncedAt。现按该字段区分“尚未同步所在群”和“最近一次同步未发现已加入的群组”；首次读取失败单独提示重试，加载时不提前显示空态。同步失败继续保留既有数据/时间，并明确“本次同步失败，仍显示上次同步结果”。未加入虚构身份或群资料。
+
+| 验证 | red | green |
+|---|---|---|
+| 成功空结果/失败保留 | `pnpm exec vitest run src/components/AccountDetails.test.tsx`，empty-red.log：成功空结果仍旧文案，断言失败 | 最小空态修复后empty-green.log 1 passed；补未同步/读取失败覆盖，最终与Accounts调用链合跑12 passed。 |
+| 结果Tag可读性 | 原构建+Edge公开UI颜色测量，colors-red.log：成功对比度2.687，未达4.5；log-colors-red.json、log-results-red.png保留实际原值和图 | 复用状态组件后colors-green.log 1 passed/4.1s；log-colors.json实测成功6.400/失败6.266，log-results.png。 |
+
+最终受影响命令 `pnpm exec vitest run src/components/AccountDetails.test.tsx src/pages/Accounts.test.tsx`：2 files / 12 passed，39.89s（affected-unit.log）。原缓存非空/失败保留、权限、显式连接意图等Accounts覆盖全部保留。`pnpm build`通过，3258 modules，6.13s（build.log，含tsc）；原大chunk警告未扩展优化。新增三种视觉用例后仅补`pnpm typecheck`通过（typecheck-final.log），不重复生产build。
+
+基于该新production dist，以临时15173 vite preview运行Edge，所有/api/仅为公共HTTP展示夹具，身份字段null、群items始终[]，不是实际账号/Telegram证据。`pnpm exec playwright test --config ../.local/inspection-20261015/iris-i18/playwright.config.mjs --grep '所在群'`：3 passed/8.9s（empty-visual.log），分别检查未同步/成功空结果/失败保留上次成功空结果，并比较失败前后同步时间不变。截图groups-not-synced.png、groups-synced-empty.png、groups-failed-retained.png及日志结果图已逐图检查，无重叠/过渡帧。临时runner首次ESM扩展名配置错误修正为.mjs后才获得上述真实行为red，不把工具启动失败计作产品red。
+
+证据全部在忽略目录 .local/inspection-20261015/iris-i18/；没有真实姓名、手机号或群名加入Git，未触5173真实账号检查/连接/同步。现有实际栈accounts.spec只更新被替代的空态文案断言，未重复整套上传/C3/B4。主控部署后再做5173只读终验，当前本地结果不冒充已部署或真实链路验收。
+
+I18最终artifact收敛：主控指出tracked浏览器测试不应依赖预先存在的ignored输出目录。已全部改用testInfo.outputPath，颜色JSON通过testInfo.attach进入标准Playwright artifact；tracked测试不依赖本地runner/人工目录。本地仅把结果复制回上述证据目录供查看。仅定向复跑4项反馈用例，feedback-final.log 4 passed / 6.9s；typecheck-artifacts.log通过。没有重复12项unit或生产build；生产代码仍与已通过的新dist一致。全部完成后停止写入，SUBMITTED等待主控部署后只读终验。
+
+I18真实响应语义补充：主控确认Telegram读取成功但username确实为空。列表/详情原位增加verificationSource==='telegram'条件，分别显示“未设置用户名”/“未设置”；尚未读取或模拟来源仍“未获取”，不改API或填造username。先新增一个公共UI用例验证列表→详情，username-red.log缺少“未设置用户名”而失败；最小两处文案修改后username-green.log 1 passed（其余9项未重复，718ms），username-typecheck.log及username-build.log通过（3258 modules、6.43s）。已有12项/4项反馈用例不重复。此前0ee9290部署版5173只读验收的脱敏结果在iris-i18/final-5173.json：身份可见性布尔通过、群数量/角色符合主控已验事实、成功Tag对比度6.400、业务POST与console/pageerror均0；本次自建Web会话退出后refresh401确认撤销，没有真实PII截图。用户名文案的新部署版仍待主控提交/重建后终验，源码冻结SUBMITTED。
+
+## I19：移除账号与网关测试替身（2026-10-15）
+
+Iris · 前端工程师，Sol High，Fast未暴露；按主控冻结的账号Revision 5执行。仅修改frontend与本人组件记录，不操作5173或真实账号，不Git/部署/递归委派。CodeGraph先定位后按磁盘确认；继续使用interface-design与TDD方法，不改现有视觉方向。
+
+先新增公开Account核验来源类型断言：`pnpm --dir frontend typecheck`在原`telegram | simulated | null`类型上报TS2344，types-red.log为实际red；首次沙箱EPERM是工具环境失败，不计产品red。最小改为`telegram | null`后同命令通过，types-green.log。类型断言依赖tsc，Vitest运行结果本身不证明静态类型正确。
+
+移除10份账号/群/消息替身测试文件：Accounts、AccountDetails、ImportGroup、Groups、GroupDetail、Sequences，以及accounts、accounts-layout、account-feedback、platform浏览器测试。Sequences现有全部用例都依赖群HTTP或WS运行，没有独立纯值/UI用例可以原样保留。删除包含C3/B4注入、synthetic SQLite Session、模拟导入检测、61行布局和同步失败缓存的旧覆盖，不计作通过；没有新造替身补回数量。
+
+保留认证/Agent测试与依赖。ApiClient认证并发用例原位改成中性受保护资源与普通value，不再借用账号数组、发送路径或Telegram消息数据；通用RealtimeClient认证/游标用例改用notification普通值，保留鉴权前拒流、重连cursor、重复seq拒绝断言。这些属于通用协议测试，不能证明Telegram消息链路。测试环境matchMedia/ResizeObserver等jsdom shims不构成账号/网关响应，保留。
+
+`pnpm --dir frontend test`：5 files / 13 passed，18.02s（unit-green.log）；仅保留的9项认证客户端、1项登录、1项Agent、1项通用WS和1项类型测试。`pnpm --dir frontend typecheck`通过；`pnpm --dir frontend build`通过，3258 modules / 9.33s（build.log），原大chunk提示未扩展处理。旧账号业务测试不在这13项内。
+
+新增empty-system.spec.ts使用真实HTTP/页面，无route/mock、无Session、无账号/群构造。只在实际GET账号为空后检查登录、上传真实文件引导、1366/1920/2560全宽；viewer隐藏写入口，实际无文件导入请求403。截图使用testInfo.outputPath标准目录。Playwright默认15173/18080，Vite明确代理到E2E_API_URL；local-stack由主控管理，不触5173。真实空栈定向联测与视觉证据待主控服务就绪，未执行不计通过。
+
+限制：本次没有验证真实上传、连接、资料获取、同步/故障保留、429、迟到响应、实际断线恢复、大列表滚动、C3、B4或真实LLM；历史证据与新空系统通过不能替代这些验收。指定账号只读页面验收待主控部署和授权，采用脱敏布尔/计数/样式并撤销自己的Web登录会话。所有本轮本地命令证据位于`.local/inspection-20261015/iris-i19/`。
+
+I19真实空栈定向验收补充：主控提供全新两独立PG库，通过Playwright的E2E_STACK_COMMAND启动local-stack（18080/18081/18082，网关telegram、schema7；无账号/Session），Vite15173。只执行`pnpm --dir frontend exec playwright test e2e/empty-system.spec.ts --reporter=list --output=../.local/inspection-20261015/iris-i19/empty-system-final-results`，2 passed / 11.9s（empty-system-final.log）。实际GET accounts=[]、真实上传指引、1366/1920/2560全宽、viewer无写按钮/实际POST import403与退出均通过，管理员页pageerror断言为空。没有请求导入/连接/同步真实账号，也没有重跑其它测试。
+
+首轮已通过三个布局宽度，在退出按钮exact accessible-name定位等待；主动停止后只改两处退出selector允许既有图标名称，未改产品或timeout。最终截图位于empty-system-final-results/empty-system-真实空系统登录后引导上传真实账号，桌面账号工作区填满可用宽度/empty-accounts-{1366,1920,2560}.png；看图1366/2560无溢出、重叠或右侧限宽空区。截图是实际空系统，不含虚构身份或真实PII。Playwright结束后准确核对自有可执行路径和监听端口，remainingOwnedProcesses=0、remainingListeners=0，记录empty-final-summary.json，附实际本次二进制hash；未接触Docker5173。该视觉来自源码Vite，最终生产镜像视觉由主控另验。
+
+S19结束后按主控授权只补两条既有日志映射：legacy_verification_reset“历史检测结果已重置”、legacy_cached_groups_unverified“历史群缓存待核验”；`pnpm --dir frontend typecheck`再次通过（types-final-mapping.log），没有重复unit/build/E2E。映射后的productionbuild与5173终验由主控负责。源码/测试/本人记录冻结，SUBMITTED。
+
+## I20 v1：业务401误重放与同步后的账号状态（2026-10-15）
+
+Iris · 前端工程师，沿用Sol High，Fast未暴露；唯一修改frontend和本TDD记录，无Git、部署、递归委派、真实账号/凭据读取或5173业务操作。先读diagnosing-bugs并CodeGraph定位，再按磁盘确认调用链；本轮不改样式或恢复已删除的账号/网关替身。
+
+公开red-capable反馈：先把ApiClient三处相同401判断原样提到同文件isWebAuthFailure，保持旧行为；`pnpm --dir frontend exec vitest run src/api/auth-failure.test.ts --reporter=verbose`的纯status/code输入回归实际2failed/3passed，401 SESSION_EXPIRED被判断为Web登录失效（auth-red.log）。这不是终态账号或网关响应替身。pnpm在失败测试后另输出递归命令提示，真实red依据是Vitest已执行并给出的断言差异，不是该包装提示。
+
+red后向主控报告三个可证伪假设：1业务401走refresh/replay清session分支；2sync失败只刷新日志使列表/详情留旧；3WS/focus/详情旧对象导致广泛不同步。主控真实只读日志显示SESSION_EXPIRED后约20ms又check ILLEGAL_TRANSITION；Orion确认Web auth401只用UNAUTHORIZED，终态SESSION_EXPIRED为401、ACCOUNT_SUSPENDED为403。该证据与原ApiClient分支吻合。第三假设没有额外证据：详情保存ID并由query取当前对象；check/transition已有onSettled刷新；WS账号事件刷新且认证重连全invalidate；query staleTime0/default可见恢复机制原已存在。没有新增轮询、额外状态层或为正常手动disconnect/connect补丁。
+
+最小修复：isWebAuthFailure只接受401+UNAUTHORIZED，三处共用；业务401保持原status/code/details返回，不续期、不重放、不清Web登录。保留原session-generation/单飞续期/cookie队列，未知业务401也不误当Web认证。既有中性protected-resource认证transport新增公开请求回归：SESSION_EXPIRED请求次数1、refresh0、原码不变且原Web登录仍在；没有账号ID/DTO、Session、Telegram RPC或account/gateway HTTP替身。
+
+第二个red：把sync既有只刷日志行为提为invalidateAccountState后，`pnpm --dir frontend exec vitest run src/api/account-cache.test.ts --reporter=verbose`用真实QueryClient和普通字符串缓存值复现accounts.isInvalidated=false（cache-red.log）。随后统一刷新accounts/account/account-logs，sync成功与失败均执行；check/transition、移动分组和既有WS账号事件原位复用，合并重复失效路径。群快照不失效、不清空，完整成功sync仍仅由既有onSuccess替换。这个小模块用于多个真实调用者和纯缓存公共契约，不新增账号状态存储。纯缓存回归覆盖列表、详情、各筛选日志及旧成功快照不变；它不宣称跑过真实账号同步故障。
+
+错误展示无需新增文案体系：既有AccountFeedback已为SESSION_EXPIRED、ACCOUNT_SUSPENDED、ILLEGAL_TRANSITION提供中文并由Feedback保留code；新增三条直接ApiError值的UI断言确认，不构造账号响应。真正transition非法仍显示ILLEGAL_TRANSITION，不在客户端改写成其他错误。
+
+最终定向`pnpm --dir frontend exec vitest run src/api/auth-failure.test.ts src/api/account-cache.test.ts src/api/client.test.ts src/components/AccountFeedback.test.tsx src/api/realtime.test.ts --reporter=verbose`：5files/20passed，7.04s（affected-green.log），包含9项既有认证并发、安全续期/会话隔离及通用WS游标回归。`pnpm --dir frontend typecheck`通过（typecheck.log）；`pnpm --dir frontend build`通过，3259modules/6.49s（build.log），原大chunk警告不扩展处理。
+
+生产artifact：index-CwaG6Tsh.js SHA256 CE2948DF793915BFF72E2F58AB88C3ADECDCE7B7B21AB01F7A471B0CB3E545A7；CSS仍index-gBi7et6o.css，SHA256 D6799A9B78D5261061B96F12DB17485170BC815A8B2D31805B24D1802C660CB6。本轮证据全部在`.local/inspection-20261015/iris-i20/`，artifact-hashes.json保留机器可读值。
+
+限制：本轮没有运行真实check/connect/sync或强制账号失效，也没有浏览器重连/窗口恢复真实故障验收；没有必要重复无法触及终态场景的空栈E2E。精确后台终态状态/code由Orion/Niko修复与验证，实际已上传账号业务按用户选择留待手动验收。上述纯条件、普通QueryClient值和中性auth transport通过不等同真实Telegram链路通过。源码与本记录稳定后冻结，SUBMITTED等待主控集成/独立review。
+
+## I21：单账号删除（2026-10-15，Revision 8）
+
+Iris · 前端工程师，复用已批准Sol High，Fast未暴露。基线5ed55b6，按共享契约Revision 8实施；无分支/Git提交、递归、真实账号/凭据读取或5173操作。先CodeGraph定位，沿用AntD组件、Accounts集中mutation、I20账号缓存与错误显示。早期202/pending/CAS建议已被用户简化要求替代，本实现不保留这些路径。
+
+列表和详情复用AccountDeleteButton，admin单账号入口，idle/disconnected/session_expired/suspended可确认，online/rate_limited/connecting禁用并提示先离线；未知状态不放行。终态删除独立于A1连接动作。Accounts持有目标ID并渲染一份DeleteAccountDialog，使用当前列表状态，状态变化可禁止确认；依赖占用仍由后端权威判断。确认文字仅说明本系统账号/凭据，不删除Telegram账号或退出其他设备。确认使用同步ref锁和pending/loading，防同帧双击，未结束不能取消；失败留窗、记录和选择，手动重试，不自动重放DELETE。
+
+按冻结契约发DELETE /api/accounts/:id，无body；204后关匹配详情/确认并prune选择，removeAccountState原位扩展现有缓存模块：过滤列表目标、清目标详情/所有筛选日志/群快照、刷新列表与分组计数，保留其他账号和历史业务缓存。MainLayout处理account_deleted {accountId}复用同一能力；列表实际集合变化时Accounts关闭匹配详情/确认并prune消失的选择，支持其他窗口删除。删除最后一行后将分页限制在有效页。没有额外状态层、事件轮询、批量删除或删除worker。
+
+沿用AccountFeedback：error.reason直接从ApiError.details.reason读取，区别active_connection/managed_group/pending_message/active_job/active_effect和安全网关fallback；未知原因使用总说明，原code始终保留。ACCOUNT_RETIRED、ACCOUNT_DELETE_INCOMPLETE与NETWORK_TIMEOUT都有中文后续提示。日志枚举补delete“删除账号”。新增AccountDeletion组件仅因为列表/详情需共用有状态确认与权限/禁用说明，不复制两套删除流程；未引依赖/主题/CSS。
+
+TDD证据均为纯props、直接错误值或真实QueryClient普通缓存键/字符串/ID，不包含account/gateway HTTP、Session或RPC替身。cache-feedback-red.log为5failed/4passed（目标缓存未清理+四个删除错误未中文化）；dialog-red.log复现三种不可删状态仍可点，以及双击onConfirm调用2次。该日志另有AntD prepare帧立即可见断言问题，不计产品red。最小安全实现后cache/错误已绿，slice-green.log剩4项仅在过渡prepare帧检查可见性，改为等待真实Tooltip/Modal可见后全绿，未修改产品动画或timeout。
+
+最终定向命令：`pnpm --dir frontend exec vitest run src/api/auth-failure.test.ts src/api/account-cache.test.ts src/api/client.test.ts src/components/AccountFeedback.test.tsx src/api/realtime.test.ts src/components/AccountDeletion.test.tsx --reporter=verbose`，6files/36passed、14.06s（affected-green.log），包含原20项受影响安全回归。新控件覆盖四个可删状态、三种先离线状态、viewer隐藏、取消无提交、双击一次/提交中禁取消、失败留窗与可重试。QueryClient覆盖只移除目标、不损其他缓存与分组计数失效。初次typecheck发现新测试借用了Playwright的exact选项；Testing Library name字符串默认精确，删除该无效选项后typecheck-final.log通过，运行时查询语义不变，未重复36项。
+
+`pnpm --dir frontend build`通过，3260modules/8.81s（build.log），原大chunk提示保留。产物index-BSdZKMfN.js SHA256 3216C82494B4A8972199D92E3D47BC314DE19A5AAF7C750808838858D115DF1D；CSS index-gBi7et6o.css / D6799A9B78D5261061B96F12DB17485170BC815A8B2D31805B24D1802C660CB6未变。artifact-hashes.json/source-hashes.json位于`.local/inspection-20261015/iris-i21/`。
+
+主控批准仅扩既有两条empty-system E2E：实际accounts=[]后，admin删除不存在ID两次204；viewer无删除入口且DELETE403，不创建任何账号。该测试编辑后的typecheck-with-empty-e2e.log通过，生产源未变，未重复unit/build。实际schema9服务由主控先交Orion再统一交接，当前尚未启动/执行浏览器，不用旧schema重复验收。
+
+边界：纯控件回调不伪造API成功，缓存值不冒充Telegram资料；本轮未验证真实已上传账号成功删除、占用拒绝、跨库不完整重试、真实凭据清理或跨窗口真实删除。后端/网关真实PG边界由各owner提供，用户现有五账号完整保留待手动验收。源码冻结SUBMITTED，等待主控独立review和schema9真实空栈联测。
+
+I21主控确认对象修正：删除确认仅随机内部ID不易核对，现复用当前Account.phone及既有accountName；手机号/昵称有值才显示，内部ID始终显示且请求仍绑定deleting ID，不读凭据、不增加API或样式。先加纯props文本输入断言，identity-red.log 1failed/11passed（手机号未显示）；最小props/文本改后identity-green.log 12passed/9.54s。输入为非真实的说明性字符串，不构造账号/网关响应。identity-typecheck.log通过，identity-build.log通过3260modules/7.65s；原缓存/transport结果复用，未重复36项。最新产物index-D3K4atoX.js SHA256 6261872789FBBEDB329E6E0E4CDB69EA93563935CDDADB2899E535489B261A3D，CSS未变。artifact/source-hashes已更新；源码再冻结，实际schema9空栈仍待主控交接。
+
+## R22 controller: per-account action state
+
+Red: pure rendered account columns could not disable only the pending account. Green: per-account mutation keys/pending IDs and synchronous double-click admission; errors stay with their account. Group moves affect selected accounts only, deletion affects its target. Removed obsolete global action busy/error state. Account columns plus deletion/auth tests23pass; typecheck/build pass. Browser check/connect budget60s covers backend connect40s plus profile12s; unrelated calls remain15s. No simulated account/Gateway response. Real concurrent account checking remains manual acceptance.
+
+## R23 controller: visual scripts and group workspace
+
+Replaced old sequence-page execution UI with reusable script library editor and per-group execution panel. JSON and visual forms share one definition; resolved preview shows actual accounts, roles and text. Five editor tests cover incomplete-name editing and invalid role/index/delay/text. Frontend46tests passed; typecheck/build passed. Pure editor/account props and preexisting auth/provider tests only; no simulated Gateway/account responses. Actual populated-group browser acceptance and real Telegram effects remain manual/pending.
+
+R24 controller:21 account feedback/row/deletion tests pass, including actionable AUTH_KEY_DUPLICATED text. Typecheck and production build pass. Account link join and group sync share per-account mutation tracking; other rows remain available. No live group operation tested.
+
+
+## R25 主控：折叠、预览与真实 AI 草稿
+
+Red：新增折叠/变量预览与AI草稿采用测试，旧编辑器2失败、原5通过。Green：编辑器8项（含错误保留内容）及既有API客户端10项通过；typecheck、生产build通过。生成候选不会自行替换编辑值或调用保存，采用后继续编辑；未配置模型显示具体原因。共享布局移除1600px上限，Table/Select显式浅蓝选择token。三个桌面宽度使用真实页面读操作验证；20步编辑示例仅存在浏览器草稿，不伪造账号或Gateway响应。原字体/控件/角色和变量契约复用；移除原全展开步骤表单和重复库预览渲染。实际模型结果的最终验收单独记录。
+
+
+R25部署验收：5173实际服务重复三桌面宽度、行选中色、折叠与预览检查通过，390px无页面横溢。实际DeepSeek草稿未采用时原编辑值仍为“新剧本”，采用后可编辑并保存。旧名称编辑测试在CI的逐字输入与指针样式检查超过5秒；改用同步DOM输入/点击事件，复用保存按钮引用，保留清空/禁用/更名/添加/保存断言。实际指针交互已经由独立浏览器验证；不提高全局超时、不减少断言。补充折叠标题min-width:0，长文本摘要正确省略且保留延迟。
+
+
+## R26 主控：批量删除与短暂操作错误
+
+Red：行内错误框回归失败，AUTH_KEY_DUPLICATED 操作失败持续撑高表格。Green：操作错误复用中文错误映射，改为 AntD App message，3 秒自动关闭；最近检测摘要与审计记录保留。单个与多个账号共用删除确认，最多三路执行既有 DELETE API，在线账号跳过，后台占用拒绝保留原因，失败不阻塞其他账号，成功目标从选择和缓存移除。纯组件回调测试覆盖双击、取消、并发上限、混合结果、失败重试；不伪造 Telegram/Gateway 响应。删除原逐行 actionErrors 状态与重复错误框，复用缓存刷新并适配 account_deleted 事件。
+
+R26 定向结果：26 项账号组件/错误提示/缓存检查通过，typecheck 与前端镜像生产构建通过。仅复用已有 AntD 控件和设计 token；紧凑 14px 表格层级、浅蓝选中态、红色删除动作与 16px 控件间距保持一致。真实账号批量删除和重新上传留给用户手动验收。
+
+## R27 主控：群工作区可用性回归
+
+Red：AgentRun已有协议错误场景断言表格失败（找不到table）；实现后通过且原始错误响应仍折叠可读。新增纯组件回归验证外部提示查看后不再出现（新消息恢复、旧历史不恢复），变量缺失指明步骤/字段且不调用预览，填写即时替换对话、仅传预览配置，逐步覆盖延续语义，日志逐条表格。MessageTimeline验证底部跟随、阅读历史不抢位置、旧消息加载保持位置及回最新按钮。14项受影响单测、TypeScript与生产构建通过，既有剧本编辑8项仍通过。
+
+真实本机服务浏览器检查：群列表管理/结束入口与取消确认，4种宽度的tab/body几何、填写变量后的后台无副作用预检（未点启动）、实际聊天滚动及日志表格；页面错误0，意外写请求0。未使用HTTP模拟群或账号成功；浏览器拦截所有群写操作，仅放行登录和预览。合成组件props仅用于渲染逻辑，不宣称Telegram业务成功。
+
+R27 部署验收：本机5173已部署代码候选fa08768，schema版本11；Gateway容器ID及启动时间保持一致，前端/后端/Agent更新，运行模式openai。部署后再次执行实际浏览器800/1366/1920/2560布局、标签不重叠、外部提示已读消失、剧本变量即时预览与后台预检确认取消、聊天定位最新、日志表格检查，页面无异常且未触发业务写入。AI回复预演调用真实deepseek-flash，用时2.425秒，针对合成活动背景返回59字相关回复；预演未发送Telegram消息。真实模型工具协议复测4.69秒通过。忽略目录ui-r27保存截图与结果；不把该证据等同真实群暂停/恢复/发送/退群验收。
+
+## R28 群管理视口高度回归
+
+Red：实际5173页面在1366×768且外部消息提示显示时，document.scrollHeight=849，聊天与右栏底边817.4，超过视口；原calc(100dvh - 250px)和560px最小高度未计入标题/提示/边距。Green：仅群详情启用固定视口的父级flex分配，标题与提示保留自然高度，群grid填充剩余空间；聊天与右栏取消固定最小高度，内部独立滚动，输入区保持可见。同一只读浏览器回归覆盖1366×768、1920×1080、2560×1440、1000×650、800×900及四个tab，页面高均等于视口、无横向溢出，两个面板底边均为视口减16px。没有隐藏超出视口的输入按钮来伪装通过。证据：ignored ui-r27/height-check.json与对应截图，frontend/.local/check-group-height-r28.mjs。复用上一轮交互与后台证据，本轮仅前端类型/构建和实际布局复核，不重跑后台或真实AI调用。
+
+## R29 剧本批次、快捷回复及账号身份
+
+Red：新渲染测试找不到“姓名 · 手机号”、排队状态与完整JSON解析结果。Green：3项批次/快捷回复测试验证显式提交前不发送、保留发送账号、文本引用、分页选择与真实队列状态；AgentRun 2项验证超过200字符的工具结果能悬浮和弹窗阅读、错误原文仍可见。账号表格/删除15项、既有剧本配置及聊天滚动4项复核通过。原详情折叠测试调整为Modal中的可见性与Tooltip断言，未删除错误证据。
+
+实际服务只读浏览器：5尺寸（800×900至2560×1440）×4页签，共20项几何检查通过；发送按钮未被裁剪。小窗口修正tab间距与字号，移除外部消息页签及未读横条，保留warning消息和可操作的快捷回复；被替代ExternalMessageNotice及专属测试/CSS删除。批次账号使用现有accountLabel，缺失资料不冒充手机号，内部ID悬浮保留；账号导入群选择、删除确认、账号详情标题同步一致。
+
+JSON全文已从真实后台历史返回，浏览器验证518字结果超过200字摘要且可查看。截图和几何证据保存在ignored ui-r29；页面错误0，浏览器业务写请求0。复用AntD Tabs/Table/Tooltip/Modal、既有消息滚动、角色预览、发送API；只新增批次展示组件，不新增第二套执行器。
+
+## R30 预览确认弹窗限高（2026-10-15）
+
+独立浏览器验证使用40步合成预览响应，仅覆盖展示；拦截所有业务写入，不启动剧本、不发送群消息。修复前1366×768视口中，弹窗 top=100、bottom=3613.39、确认按钮 bottom=3593.39，直接复现超出窗口。修复原 Modal 的 container/body/header/footer 样式：上下各24px，最大高度100dvh-48px，内容内部滚动，标题和确认按钮不参与滚动。未新增组件或改变预检/启动契约。
+
+修复后1366×768、1920×1080、800×600、640×400四尺寸均确认弹窗及底部按钮在视口内、可滚动到第40步、关闭按钮可用，pageerror=0、businessWrites=0。证据位于忽略目录 `.local/inspection-20261015/ui-r30/`，验证脚本 `frontend/.local/verify-preview-r30.mjs`。`pnpm run typecheck`通过，既有`GroupWorkspace.test.tsx`3项通过；初始化依赖沙箱错误及定位器修正不计作产品RED。
+
+R30 CI 收敛：远端 38749314489 有批次分页/编辑器两项 5000ms 超时；同候选 38749988976 仍有分页超时。仅将这两项中反复计算整个可访问性树的按钮定位替换为唯一可见文案定位，保留全部业务断言、默认超时和生产代码。定向两文件11项通过；分页用例2745ms，清空/重填名称与角色保存用例1039ms。未通过延长超时或删除断言掩盖失败。
+
+## R31 群工作区记录与导入入口
+
+Red：旧发送记录把变量值放在行内 details；新行为测试找不到账号优先选择入口和 Agent 独立页签。Green：内容两行摘要并保留全文 Tooltip，变量用限高 Modal；Agent 独立页签选择最近50次处理，复用 AgentRunDetails 展示每次全部工具/回复和完整结果，不另建执行器。右栏移除历史列表及失效样式，控制与成员区分隔。五页签在窄屏换行，避免裁切。
+
+导入复用 account-joined-groups 查询缓存、同步接口、account-action 占用标记和姓名手机号格式；选择账号后显示缓存，可手动同步，再选择超级群和其他已入群账号。切换账号清空旧群选择，操作失败用短暂 message。组件测试仅验证缓存展示/请求输入/失败，不模拟 Telegram 导入成功。新增3项行为回归，旧Agent详情、剧本批次、账号错误及配置检查定向复核。页面与弹窗几何通过真实页面只读浏览器验证，拦截业务写入；截图和结果在 ignored ui-r31。
+
+R31定向结果：最终18项交互/客户端测试通过，另12项账号错误及群配置复核通过，typecheck通过；只读浏览器5尺寸×5页签共25项布局检查通过，快捷回复/变量Modal/JSON/导入下拉检查通过，pageerror=0、businessWrites=0。Agent表格为嵌入窗口预留固定正文列，避免工具列挤成竖排。
+
+
+## R32 C1 媒体展示与 C3
+
+Red: GroupDetail 的媒体-only消息找不到“贴纸 · 下载中”，原页面为空气泡。Green: 页面状态与WebP/WebM/audio渲染、对象URL清理通过；复用已有聊天面板与短错误提示。定向4文件18项通过，typecheck/build通过（既有主包体积警告保留，未扩展为打包重构）。
+
+新增 `e2e/group-agent.spec.ts`：实际 viewer 登录→已有群→Agent批次→全部步骤→Tooltip/完整JSON。只读路由护栏拒绝业务写请求，禁用含真实内容的trace/截图。本机已有系统实际1 passed；空系统CI明确skip该例，原空系统测试不受影响。这不是新的真实LLM或群发送验收。
+
+R32现场只读验证：schema12迁移完成，当前Telegram群历史TGS贴纸（8244字节）和MP4（169847字节）真实下载成功；随后同群新收到的MP4也完成下载。浏览器TGS生成SVG动画，两个视频均解码为720×540、时长约1.84秒；1366×900、800×768、640×768无外层滚动溢出，pageerror=0、业务写请求=0。C3更新后再次1 passed。现场内容/截图只在ignored ui-r32，不进入Git。

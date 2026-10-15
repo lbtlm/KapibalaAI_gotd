@@ -13,6 +13,7 @@ async function deploymentFixture(options={}) {
   const directory=await mkdtemp(path.join(os.tmpdir(),'kapibala-deploy-cli-'));
   const sha='a'.repeat(40);
   const services={postgres:{image:'postgres:16'}};
+  if (options.gatewayDatabase) services['gateway-db']={image:'postgres:16'};
   for (const [name,image] of Object.entries({backend:'backend',migrate:'backend',agent:'backend',gateway:'gateway',frontend:'frontend'})) {
     services[name]={image:'kapibala-'+image+':'+sha,build:{context:'unavailable-source'}};
   }
@@ -33,6 +34,7 @@ if (['load','image','compose'].includes(command)) {
   appendFileSync(process.env.DOCKER_TRACE,JSON.stringify({args})+'\\n');
   if (args.includes('build') || args.includes('--build') || args.includes('pull')) {console.error('candidate build or pull attempted');process.exit(7);}
   if (command==='image' && process.env.FIXTURE_MISSING_IMAGE==='1') {console.error('image not found');process.exit(1);}
+  if (command==='compose' && args.includes('config')) console.log(process.env.FIXTURE_GATEWAY_DATABASE==='1' ? 'postgres\\ngateway-db\\nmigrate\\ngateway' : 'postgres\\nmigrate\\ngateway');
   if (command==='compose' && args.includes('run')) {
     if (args.includes('--no-build')) {console.error('unknown flag: --no-build');process.exit(2);}
     if (args[args.indexOf('--pull')+1]!=='never') {console.error('migration may pull an image');process.exit(3);}
@@ -50,7 +52,7 @@ if (['load','image','compose'].includes(command)) {
   const child=spawn(process.execPath,[path.join(directory,'scripts','deploy.mjs'),directory,project,options.mode || 'deploy'],{
     cwd:directory,windowsHide:true,env:{...process.env,POSTGRES_PASSWORD:'fixture-only',CONSOLE_PORT:String(server.address().port),DOCKER_COMMAND:process.execPath,
       NODE_OPTIONS:'--import '+pathToFileURL(executable).href,DOCKER_TRACE:trace,
-      FIXTURE_MISSING_IMAGE:options.missingImage ? '1' : '',FIXTURE_MIGRATION_FAIL:options.migrationFail ? '1' : ''},
+      FIXTURE_MISSING_IMAGE:options.missingImage ? '1' : '',FIXTURE_MIGRATION_FAIL:options.migrationFail ? '1' : '',FIXTURE_GATEWAY_DATABASE:options.gatewayDatabase ? '1' : ''},
     stdio:['ignore','pipe','pipe'],
   });
   let stdout='',stderr='';child.stdout.on('data',chunk=>stdout+=chunk);child.stderr.on('data',chunk=>stderr+=chunk);
@@ -72,6 +74,16 @@ test('deployment runs migration with supported CLI options using only loaded ori
     assert.ok(inspected>=0 && inspected<stopped,'original candidate images must exist before stopping the prior application');
     for (const component of ['backend','gateway','frontend']) assert.ok(result.calls[inspected].args.includes('kapibala-'+component+':'+result.sha));
     assert.doesNotMatch(result.stdout+result.stderr,/fixture-only/,'private config is never printed');
+  } finally {await rm(result.directory,{recursive:true,force:true});}
+});
+
+test('a candidate with a separate gateway database initializes it before gateway startup',async () => {
+  const result=await deploymentFixture({gatewayDatabase:true});
+  try {
+    assert.equal(result.exitCode,0,result.stderr);
+    const initialized=result.calls.findIndex(call=>call.args.includes('run') && call.args.at(-1)==='gateway-db');
+    const started=result.calls.findIndex(call=>call.args.includes('up') && call.args.includes('gateway'));
+    assert.ok(initialized>=0 && initialized<started,'gateway database must exist before starting gateway');
   } finally {await rm(result.directory,{recursive:true,force:true});}
 });
 

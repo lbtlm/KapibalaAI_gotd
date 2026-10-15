@@ -159,16 +159,23 @@ func (a *App) processEvent(ctx context.Context, id int64) error {
 		if err != nil {
 			return err
 		}
+		if str("mediaUrl") != "" {
+			_, e = tx.Exec(ctx, `UPDATE messages SET media_url=$3,media_kind=$4,media_mime=$5,media_name=$6,media_status='pending' WHERE group_id=$1 AND msg_id=$2 AND media_url IS NULL`, groupID, str("msgId"), str("mediaUrl"), str("mediaKind"), str("mediaMime"), str("mediaName"))
+			if e != nil {
+				return e
+			}
+		}
 		if tag.RowsAffected() > 0 {
 			if e = emit(ctx, tx, "message", map[string]any{"groupId": groupID, "msgId": str("msgId"), "isOwn": own}); e != nil {
 				return e
 			}
 			if !own {
-				_, e = tx.Exec(ctx, `INSERT INTO agent_pending(group_id,msg_id) SELECT id,$2 FROM groups WHERE id=$1 AND status='active' AND agent_enabled ON CONFLICT DO NOTHING`, groupID, str("msgId"))
+				_, e = tx.Exec(ctx, `INSERT INTO agent_pending(group_id,msg_id) SELECT id,$2 FROM groups WHERE id=$1 AND status='active' AND agent_enabled AND NOT marketing_paused ON CONFLICT DO NOTHING`, groupID, str("msgId"))
 			}
 		}
 	case "message_failed":
-		var groupID, account string
+		var groupID string
+		var account *string
 		e = tx.QueryRow(ctx, `SELECT group_id,account_id FROM messages WHERE client_msg_id=$1 FOR UPDATE`, str("clientMsgId")).Scan(&groupID, &account)
 		if e == pgx.ErrNoRows {
 			e = nil
@@ -180,10 +187,12 @@ func (a *App) processEvent(ctx context.Context, id int64) error {
 		code := str("code")
 		if code == "GROUP_WRITE_FORBIDDEN" {
 			e = unreachable(ctx, tx, groupID)
-		} else if code == "ACCOUNT_SUSPENDED" {
+		} else if code == "ACCOUNT_SUSPENDED" && account != nil {
 			var from string
-			if e = tx.QueryRow(ctx, `SELECT status FROM accounts WHERE id=$1 FOR UPDATE`, account).Scan(&from); e == nil {
-				e = transition(ctx, tx, account, from, "suspended", nil)
+			if e = tx.QueryRow(ctx, `SELECT status FROM accounts WHERE id=$1 FOR UPDATE`, *account).Scan(&from); e == pgx.ErrNoRows {
+				e = nil
+			} else if e == nil && accountTerminalError(from) == nil {
+				e = transition(ctx, tx, *account, from, "suspended", nil)
 			}
 		}
 		if e != nil {
@@ -196,9 +205,31 @@ func (a *App) processEvent(ctx context.Context, id int64) error {
 		_, e = tx.Exec(ctx, `DELETE FROM members WHERE group_id=(SELECT id FROM groups WHERE gateway_group_id=$1) AND platform_user_id=$2`, str("groupId"), str("platformUserId"))
 	case "account_status":
 		var from string
-		e = tx.QueryRow(ctx, `SELECT status FROM accounts WHERE id=$1 FOR UPDATE`, str("accountId")).Scan(&from)
+		var incarnation *string
+		e = tx.QueryRow(ctx, `SELECT status,connection_id FROM accounts WHERE id=$1 FOR UPDATE`, str("accountId")).Scan(&from, &incarnation)
+		if e == pgx.ErrNoRows {
+			e = nil
+			break
+		}
 		if e == nil {
-			e = transition(ctx, tx, str("accountId"), from, str("status"), nil)
+			if str("status") == "offline" {
+				if incarnation == nil || str("connectionId") == "" || *incarnation != str("connectionId") {
+					break
+				}
+				if from == "online" || from == "rate_limited" {
+					e = transition(ctx, tx, str("accountId"), from, "disconnected", nil)
+					if e == nil {
+						e = writeAccountLog(ctx, tx, str("accountId"), "gateway", "connection_ended", nil)
+					}
+				} else if from == "idle" || from == "disconnected" {
+					_, e = tx.Exec(ctx, `UPDATE accounts SET connection_id=NULL WHERE id=$1 AND connection_id=$2`, str("accountId"), str("connectionId"))
+				}
+			} else {
+				if accountTerminalError(from) != nil && accountTerminalError(str("status")) != nil {
+					break
+				}
+				e = transition(ctx, tx, str("accountId"), from, str("status"), nil)
+			}
 		}
 	}
 	if e != nil {

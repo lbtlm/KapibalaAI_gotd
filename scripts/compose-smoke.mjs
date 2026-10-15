@@ -78,7 +78,7 @@ export async function smoke(frontend,gateway,agent) {
   const backend = await backendHealth.json();
   const messageGateway = await gatewayHealth.json();
   const provider = await agentHealth.json();
-  if (backend.ok !== true || messageGateway.status !== 'ok' || messageGateway.mode !== 'fake' || provider.ok !== true || provider.mode !== 'scripted') {
+  if (backend.ok !== true || messageGateway.status !== 'ok' || messageGateway.mode !== 'telegram' || provider.ok !== true || provider.mode !== 'scripted') {
     throw new Error('Container health contract failed');
   }
   const root = await fetch(frontend+'/',{signal:AbortSignal.timeout(5000)});
@@ -94,6 +94,11 @@ export async function smoke(frontend,gateway,agent) {
   if (!response.ok || login.role !== 'admin' || typeof login.accessToken !== 'string' || !login.accessToken || !/refresh_token=/.test(cookie) || !/httponly/i.test(cookie)) {
     throw new Error('Container login contract failed');
   }
+  const accountResponse=await fetch(frontend+'/api/accounts',{headers:{Authorization:'Bearer '+login.accessToken},signal:AbortSignal.timeout(5000)});
+  const accounts=await accountResponse.json();
+  if (!accountResponse.ok || !Array.isArray(accounts) || accounts.length!==0) throw new Error('Fresh candidate must start without accounts');
+  const removed=await fetch(gateway+'/admin/reset',{method:'POST',signal:AbortSignal.timeout(5000)});
+  if (removed.status!==404) throw new Error('Removed gateway simulation control is still reachable');
   const origin=new URL(frontend).origin;
   const valid=await websocket(frontend,origin,login.accessToken);
   if (valid.status!==101 || valid.auth?.type!=='auth' || valid.auth.success!==true) throw new Error('WebSocket same-origin authentication failed');
@@ -101,13 +106,15 @@ export async function smoke(frontend,gateway,agent) {
   if (invalid.status!==101 || invalid.auth?.type!=='auth' || invalid.auth.success!==false) throw new Error('WebSocket invalid token was not rejected');
   const cross=await websocket(frontend,'http://example.invalid');
   if (cross.status!==403) throw new Error('WebSocket cross-origin upgrade was not rejected');
+  const logout=await fetch(frontend+'/api/auth/logout',{method:'POST',headers:{Authorization:'Bearer '+login.accessToken},signal:AbortSignal.timeout(5000)});
+  if (!logout.ok) throw new Error('Candidate smoke login session was not revoked');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const [frontend,gateway,agent] = process.argv.slice(2);
-    if (!frontend || !gateway || !agent) throw new Error('Usage: node scripts/compose-smoke.mjs <frontend-url> <fake-gateway-url> <scripted-provider-url>');
+    if (!frontend || !gateway || !agent) throw new Error('Usage: node scripts/compose-smoke.mjs <fresh-frontend-url> <telegram-gateway-url> <scripted-provider-url>');
     await smoke(frontend,gateway,agent);
-    console.log('Candidate images: health, frontend page/asset, login and WebSocket origin/auth contracts passed');
+    console.log('Candidate images: real empty-account services, frontend assets, login and WebSocket origin/auth contracts passed; no Telegram accounts or RPCs exercised');
   } catch(error) {console.error(error.message);process.exitCode=1;}
 }

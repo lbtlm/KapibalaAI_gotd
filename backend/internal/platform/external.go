@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"strings"
+	"time"
 )
 
 type externalError struct {
@@ -27,6 +30,26 @@ func externalCode(e error) string {
 func (a *App) gateway(ctx context.Context, method, path string, input, output any) error {
 	return a.request(ctx, a.cfg.GatewayURL, method, path, input, output)
 }
+func (a *App) requestClient(base, method, path string) *http.Client {
+	if base == a.cfg.AgentURL && method == http.MethodPost && (path == "/sequences/generate" || path == "/agent/reply-preview") {
+		client := *a.client
+		client.Timeout = 60 * time.Second
+		return &client
+	}
+	if base == a.cfg.GatewayURL && method == http.MethodPost && (path == "/groups/import" || strings.HasPrefix(path, "/accounts/") && strings.HasSuffix(path, "/connect")) {
+		client := *a.client
+		client.Timeout = 40 * time.Second // Connection startup or multi-account import verification.
+		return &client
+	}
+	return a.client
+}
+func transportFailure(err error) *externalError {
+	var timeout net.Error
+	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &timeout) && timeout.Timeout() {
+		return &externalError{Status: 504, Code: "NETWORK_TIMEOUT"}
+	}
+	return &externalError{Status: 503, Code: "GATEWAY_UNAVAILABLE"}
+}
 func (a *App) request(ctx context.Context, base, method, path string, input, output any) error {
 	if input == nil && method == http.MethodPost {
 		input = map[string]any{}
@@ -44,14 +67,14 @@ func (a *App) request(ctx context.Context, base, method, path string, input, out
 		return e
 	}
 	req.Header.Set("Content-Type", "application/json")
-	res, e := a.client.Do(req)
+	res, e := a.requestClient(base, method, path).Do(req)
 	if e != nil {
-		return &externalError{Status: 504, Code: "NETWORK_TIMEOUT"}
+		return transportFailure(e)
 	}
 	defer res.Body.Close()
 	b, e := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if e != nil {
-		return e
+		return transportFailure(e)
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		var v struct {

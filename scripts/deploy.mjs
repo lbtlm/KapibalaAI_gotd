@@ -33,17 +33,20 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const directory = path.resolve(directoryArg);
     const sha = await verifyCandidate(directory);
     const env = {...process.env,CANDIDATE_SHA:sha,COMPOSE_PROJECT_NAME:project};
-    const docker = (args) => {
-      const result = spawnSync(process.env.DOCKER_COMMAND || 'docker',args,{env,stdio:'inherit',windowsHide:true});
+    const docker = (args,capture=false) => {
+      const result = spawnSync(process.env.DOCKER_COMMAND || 'docker',args,{env,stdio:capture ? ['ignore','pipe','inherit'] : 'inherit',encoding:'utf8',windowsHide:true});
       if (result.error || result.status !== 0) throw new Error('Docker operation failed; candidate was not accepted as healthy');
+      return result.stdout;
     };
     docker(['load','--input',path.join(directory,'images.tar.gz')]);
     // Refuse missing original images before stopping a working application.
     docker(['image','inspect','--format','{{.Id}}',...['backend','gateway','frontend'].map(component=>`kapibala-${component}:${sha}`)]);
     const compose = ['compose','-f',path.join(directory,'compose.yaml'),'-p',project];
     if (mode === 'deploy') {
+      const services = docker([...compose,'config','--services'],true).trim().split(/\s+/);
       docker([...compose,'stop','backend','agent','gateway']);
       docker([...compose,'up','-d','--no-build','postgres']);
+      if (services.includes('gateway-db')) docker([...compose,'run','--rm','--pull','never','gateway-db']);
       docker([...compose,'run','--rm','--pull','never','migrate']);
     }
     docker([...compose,'up','-d','--no-build','--no-deps','postgres','gateway','agent','backend','frontend']);

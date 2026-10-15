@@ -6,10 +6,10 @@ const platform = 'github.com/lbtlm/KapibalaAI_gotd/backend/internal/platform';
 const provider = 'github.com/lbtlm/KapibalaAI_gotd/backend/internal/provider';
 const gateway = 'github.com/lbtlm/KapibalaAI_gotd/gateway';
 
-test('only the exact inactive gateway crash subprocess helper may skip', () => {
+test('gateway tests have no dormant helper skip exemption', () => {
   const helper = {Package:gateway,Test:'TestGatewayCrashChild'};
-  assert.equal(allowedSkip('gateway',helper,{}),true);
-  assert.equal(allowedSkip('gateway',helper,{GATEWAY_CRASH_CHILD:'0'}),true);
+  assert.equal(allowedSkip('gateway',helper,{}),false);
+  assert.equal(allowedSkip('gateway',helper,{GATEWAY_CRASH_CHILD:'0'}),false);
   assert.equal(allowedSkip('gateway',helper,{GATEWAY_CRASH_CHILD:'1'}),false);
   assert.equal(allowedSkip('backend',helper,{}),false);
   assert.equal(allowedSkip('gateway',{...helper,Package:platform},{}),false);

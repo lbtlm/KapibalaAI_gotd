@@ -32,13 +32,11 @@ func TestEmptyFinalSummaryRemainsStringRatherThanNull(t *testing.T) {
 				}
 			}))
 			defer agent.Close()
-			g := gatewayFixture(t)
-			a, s := fixture(t, platform.Config{GatewayURL: g.server.URL, AgentURL: agent.URL})
+			a, s, cfg := fixtureConfig(t, platform.Config{AgentURL: agent.URL})
+			group := insertAgentInput(t, cfg)
 			a.Start(context.Background())
 			token, _ := login(t, s, "admin")
-			group := createGroup(t, s, token)
-			call(t, s, "PATCH", "/api/groups/"+group, token, `{"agentEnabled":true}`)
-			g.event("message", map[string]any{"groupId": "gateway-group", "msgId": "empty-trigger", "senderPlatformUserId": "outside", "text": "trigger", "sentAt": time.Now().UTC().Format(time.RFC3339Nano)})
+
 			eventually(t, 4*time.Second, func() bool {
 				runs := runList(t, s, token, group)
 				if len(runs) != 1 || runs[0]["status"] != "finished" {
@@ -68,16 +66,11 @@ func TestPublicTimesUseUTCWhenHostTimezoneIsNotUTC(t *testing.T) {
 		}
 		return
 	}
-	g := gatewayFixture(t)
-	a, s := fixture(t, platform.Config{GatewayURL: g.server.URL})
-	a.Start(context.Background())
+	_, s, cfg := fixtureConfig(t)
+	group := insertBusinessGroup(t, cfg)
 	token, _ := login(t, s, "admin")
-	group := createGroup(t, s, token)
-	g.mu.Lock()
-	g.rateOnce = true
-	g.mu.Unlock()
-	call(t, s, "POST", "/api/groups/"+group+"/send", token, `{"accountId":"account-1","text":"UTC contract"}`)
-	eventually(t, time.Second, func() bool { return accountStatus(t, s, token, "account-1") == "rate_limited" })
+	businessSQL(t, cfg, `UPDATE accounts SET status='rate_limited',rate_limited_until=now()+interval '1 hour' WHERE id='account-1'`)
+	businessSQL(t, cfg, `INSERT INTO messages(group_id,msg_id,sender_platform_user_id,is_own,text) VALUES($1,'utc-input','database-author',false,'database timestamp input')`, group)
 	req, _ := http.NewRequest("GET", s.URL+"/api/accounts", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	res, e := s.Client().Do(req)

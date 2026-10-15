@@ -47,7 +47,7 @@ func (d updateStorage) GetState(ctx context.Context, uid int64) (updates.State, 
 	return s, e == nil, e
 }
 func (d updateStorage) SetState(ctx context.Context, uid int64, s updates.State) error {
-	return d.exec(ctx, "INSERT INTO gateway_update_state(account_id,user_id,pts,qts,date,seq) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(account_id,user_id) DO UPDATE SET pts=$3,qts=$4,date=$5,seq=$6", d.id, uid, s.Pts, s.Qts, s.Date, s.Seq)
+	return d.exec(ctx, "INSERT INTO gateway_update_state(account_id,user_id,pts,qts,date,seq) SELECT $1,$2,$3,$4,$5,$6 WHERE EXISTS(SELECT 1 FROM gateway_account_configs WHERE account_id=$1) AND NOT EXISTS(SELECT 1 FROM gateway_retired_accounts WHERE account_id=$1) ON CONFLICT(account_id,user_id) DO UPDATE SET pts=$3,qts=$4,date=$5,seq=$6", d.id, uid, s.Pts, s.Qts, s.Date, s.Seq)
 }
 func (d updateStorage) field(ctx context.Context, uid int64, column string, value int) error {
 	return d.exec(ctx, "UPDATE gateway_update_state SET "+column+"=$3 WHERE account_id=$1 AND user_id=$2", d.id, uid, value)
@@ -76,7 +76,7 @@ func (d updateStorage) GetChannelPts(ctx context.Context, uid, cid int64) (int, 
 	return pts, e == nil && pts > 0, e
 }
 func (d updateStorage) SetChannelPts(ctx context.Context, uid, cid int64, pts int) error {
-	return d.exec(ctx, "INSERT INTO gateway_channel_state(account_id,user_id,channel_id,pts) VALUES($1,$2,$3,$4) ON CONFLICT(account_id,user_id,channel_id) DO UPDATE SET pts=$4", d.id, uid, cid, pts)
+	return d.exec(ctx, "INSERT INTO gateway_channel_state(account_id,user_id,channel_id,pts) SELECT $1,$2,$3,$4 WHERE EXISTS(SELECT 1 FROM gateway_account_configs WHERE account_id=$1) AND NOT EXISTS(SELECT 1 FROM gateway_retired_accounts WHERE account_id=$1) ON CONFLICT(account_id,user_id,channel_id) DO UPDATE SET pts=$4", d.id, uid, cid, pts)
 }
 func (d updateStorage) ForEachChannels(ctx context.Context, uid int64, f func(context.Context, int64, int) error) error {
 	rows, e := d.db.QueryContext(ctx, "SELECT channel_id,pts FROM gateway_channel_state WHERE account_id=$1 AND user_id=$2 AND pts>0", d.id, uid)
@@ -97,7 +97,7 @@ func (d updateStorage) ForEachChannels(ctx context.Context, uid int64, f func(co
 	return rows.Err()
 }
 func (d updateStorage) SetChannelAccessHash(ctx context.Context, uid, cid, hash int64) error {
-	return d.exec(ctx, "INSERT INTO gateway_channel_state(account_id,user_id,channel_id,access_hash) VALUES($1,$2,$3,$4) ON CONFLICT(account_id,user_id,channel_id) DO UPDATE SET access_hash=$4", d.id, uid, cid, hash)
+	return d.exec(ctx, "INSERT INTO gateway_channel_state(account_id,user_id,channel_id,access_hash) SELECT $1,$2,$3,$4 WHERE EXISTS(SELECT 1 FROM gateway_account_configs WHERE account_id=$1) AND NOT EXISTS(SELECT 1 FROM gateway_retired_accounts WHERE account_id=$1) ON CONFLICT(account_id,user_id,channel_id) DO UPDATE SET access_hash=$4", d.id, uid, cid, hash)
 }
 func (d updateStorage) GetChannelAccessHash(ctx context.Context, uid, cid int64) (int64, bool, error) {
 	var hash int64

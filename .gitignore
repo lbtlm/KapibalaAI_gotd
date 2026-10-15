@@ -1,4 +1,5 @@
 .local/
+media/
 tmp/
 .env
 .env.*

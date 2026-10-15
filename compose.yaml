@@ -24,18 +24,38 @@ services:
         condition: service_healthy
     restart: 'no'
 
-  gateway:
-    image: kapibala-gateway:${CANDIDATE_SHA:-local}
-    build: ./gateway
+  gateway-db:
+    image: postgres:16
     environment:
-      DATABASE_URL: postgres://kapibala:${POSTGRES_PASSWORD}@postgres:5432/kapibala?sslmode=disable
-      BIND_HOST: 0.0.0.0
-      PORT: 8081
-      GATEWAY_MODE: fake
-      GATEWAY_ADMIN_ENABLED: 'false'
+      PGHOST: postgres
+      PGUSER: kapibala
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: postgres
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        psql -v ON_ERROR_STOP=1 <<'SQL'
+        SELECT 'CREATE DATABASE kapibala_telegram_gateway OWNER kapibala'
+        WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'kapibala_telegram_gateway');
+        \gexec
+        SQL
     depends_on:
       postgres:
         condition: service_healthy
+    restart: 'no'
+
+  gateway:
+    image: kapibala-gateway:${CANDIDATE_SHA:-local}
+    build: ./gateway
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://kapibala:${POSTGRES_PASSWORD}@postgres:5432/kapibala_telegram_gateway?sslmode=disable
+      BIND_HOST: 0.0.0.0
+      PORT: 8081
+      GATEWAY_MODE: telegram
+    depends_on:
+      gateway-db:
+        condition: service_completed_successfully
 
   agent:
     image: kapibala-backend:${CANDIDATE_SHA:-local}
@@ -45,8 +65,12 @@ services:
       DATABASE_URL: postgres://kapibala:${POSTGRES_PASSWORD}@postgres:5432/kapibala?sslmode=disable
       BIND_HOST: 0.0.0.0
       PORT: 8082
-      AGENT_MODE: scripted
+      AGENT_MODE: ${AGENT_MODE:-scripted}
       AGENT_ADMIN_ENABLED: 'false'
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-flash}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com}
+      OPENAI_API_STYLE: ${OPENAI_API_STYLE:-chat_completions}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -60,6 +84,10 @@ services:
       AGENT_URL: http://agent:8082
       BIND_HOST: 0.0.0.0
       PORT: 8080
+      MEDIA_DIR: /app/media
+      MEDIA_RETENTION_DAYS: ${MEDIA_RETENTION_DAYS:-30}
+    volumes:
+      - media-data:/app/media
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -81,3 +109,4 @@ services:
 
 volumes:
   postgres-data:
+  media-data:

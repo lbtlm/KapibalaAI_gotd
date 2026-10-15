@@ -1,31 +1,27 @@
-import {useEffect,useRef,useState} from 'react'
-import {useSearchParams} from 'react-router-dom'
+import {useState} from 'react'
+import {Link} from 'react-router-dom'
 import {useMutation,useQuery,useQueryClient} from '@tanstack/react-query'
-import {Button,Form,Input,Select,Modal,Table,Alert} from 'antd'
-import {api,ApiError} from '../api/client'
-import type {Group,Sequence,SequenceInput,PreviewStep} from '../types'
+import {Button,Modal,Table} from 'antd'
+import {api} from '../api/client'
+import type {Sequence} from '../types'
 import {useSession} from '../hooks'
 import {ErrorNotice,LoadState} from '../components/Feedback'
-import VariableValues from '../components/VariableValues'
-import SequenceProgress from '../components/SequenceProgress'
+import SequenceEditor,{type GeneratedSequence} from '../components/SequenceEditor'
+import SequencePreview from '../components/SequencePreview'
 import styles from '../layout/MainLayout.module.scss'
-interface PreflightSnapshot {input:SequenceInput;groupId:string;revision:number}
-function stringMap(value:unknown):value is Record<string,string>{return !!value&&typeof value==='object'&&!Array.isArray(value)&&Object.values(value).every(v=>typeof v==='string')}
+
 export default function Sequences(){
- const session=useSession(),cache=useQueryClient(),[search]=useSearchParams()
- const groups=useQuery({queryKey:['groups'],queryFn:()=>api.request<Group[]>('/api/groups')})
- const sequences=useQuery({queryKey:['sequences'],queryFn:()=>api.request<Sequence[]>('/api/sequences')})
- const [group,setGroup]=useState(search.get('group')??''),[sequence,setSequence]=useState(''),[vars,setVars]=useState('{}'),[stepVars,setStepVars]=useState('{}')
- const revision=useRef(0)
- function invalidatePreview(){revision.current++;setPreview(null)}
- const [preview,setPreview]=useState<(PreflightSnapshot&{steps:PreviewStep[]})|null>(null),[lastRun,setLastRun]=useState<{id:string;groupId:string}|null>(null),[localError,setLocalError]=useState<unknown>(),[createOpen,setCreateOpen]=useState(false)
- const selected=sequence||sequences.data?.[0]?.id||''
- const inspect=useMutation({mutationFn:(snapshot:PreflightSnapshot)=>api.request<{steps:PreviewStep[]}>('/api/groups/'+snapshot.groupId+'/sequence-runs/preview','POST',snapshot.input),onSuccess:(result,snapshot)=>{if(snapshot.revision===revision.current)setPreview({...result,...snapshot})}})
- const start=useMutation({mutationFn:(snapshot:PreflightSnapshot)=>api.request<{runId:string}>('/api/groups/'+snapshot.groupId+'/sequence-runs','POST',snapshot.input),onSuccess:(r,snapshot)=>{setLastRun({id:r.runId,groupId:snapshot.groupId});setPreview(null);cache.invalidateQueries({queryKey:['groups']})}})
- const create=useMutation({mutationFn:(data:unknown)=>api.request('/api/sequences','POST',data),onSuccess:()=>{setCreateOpen(false);cache.invalidateQueries({queryKey:['sequences']})}})
- function preflight(){setLocalError(null);invalidatePreview();try {const defaults:unknown=JSON.parse(vars),overrides:unknown=JSON.parse(stepVars);if(!stringMap(defaults)||!overrides||typeof overrides!=='object'||Array.isArray(overrides)||!Object.entries(overrides).every(([key,v])=>/^\d+$/.test(key)&&stringMap(v)))throw new Error('vars 和 stepVars 必须使用字符串值的 JSON 对象');inspect.mutate({groupId:group,revision:revision.current,input:{sequenceId:selected,vars:defaults,stepVars:overrides as Record<string,Record<string,string>>}})}catch(e){setLocalError(e)}}
- const currentGroup=groups.data?.find(g=>g.id===group),serverRun=currentGroup?.activeSequenceRunId
- useEffect(()=>{if(serverRun)setLastRun({id:serverRun,groupId:group})},[serverRun,group])
- const activeRun=serverRun||(lastRun?.groupId===group?lastRun.id:null)
- return <section><div className={styles.pageHeading}><div><h1>定时序列</h1><p>核对逐步变量，再启动群消息序列。</p></div>{session?.role==='admin'&&<Button onClick={()=>setCreateOpen(true)}>新增序列</Button>}</div><ErrorNotice error={groups.error??sequences.error??localError??inspect.error??start.error}/><div className={styles.sequenceLayout}><aside className={styles.sequenceConfig}><Form layout="vertical"><Form.Item label="目标群组"><Select value={group||undefined} onChange={v=>{setGroup(v);invalidatePreview()}} options={groups.data?.map(g=>({value:g.id,label:g.id,disabled:g.status!=='active'}))}/></Form.Item><Form.Item label="选择序列"><Select value={selected||undefined} onChange={v=>{setSequence(v);invalidatePreview()}} options={sequences.data?.map(s=>({value:s.id,label:s.name}))}/></Form.Item>{session?.role==='admin'&&<><Form.Item label="默认变量 vars" extra='例如 {"event":"周会","time":"14:00"}'><Input.TextArea aria-label="默认变量 vars" rows={4} value={vars} onChange={e=>{setVars(e.target.value);invalidatePreview()}}/></Form.Item><Form.Item label="逐步覆盖 stepVars" extra='例如 {"2":{"time":"15:00"}}；空字符串表示本步不改'><Input.TextArea aria-label="逐步覆盖 stepVars" rows={4} value={stepVars} onChange={e=>{setStepVars(e.target.value);invalidatePreview()}}/></Form.Item><Button aria-label="预检" aria-busy={inspect.isPending} type="primary" block disabled={!group||!selected} loading={inspect.isPending} onClick={preflight}>预检</Button><p className={styles.meta}>预检只解析文本，不会发送消息。</p></>}</Form>{session?.role==='viewer'&&<Alert type="info" title="只读模式，可查看现有序列与运行进度"/>}</aside><div className={styles.sequenceDefinition}><h2>{sequences.data?.find(s=>s.id===selected)?.name??'序列步骤'}</h2><p className={styles.meta}>每步在前一步发出后按延迟时间执行。</p><LoadState loading={sequences.isLoading} empty={!sequences.isLoading&&!sequences.data?.length} description="先新增包含角色、消息文本与延迟的序列。"/><div className={styles.sequenceSteps}>{sequences.data?.find(s=>s.id===selected)?.steps.map(step=><article className={styles.sequenceStep} key={step.index}><span className={styles.stepNumber}>{step.index}</span><div><span className={styles.sequenceRole}>{step.accountRole==='admin'?'管理员 / 群主':'成员'}</span><p>{step.text}</p></div><span className={styles.sequenceDelay}>延迟 {step.delaySeconds}s</span></article>)}</div>{activeRun&&<SequenceProgress id={activeRun}/>}</div></div><Modal width={880} open={!!preview} title="确认预检结果" onCancel={()=>setPreview(null)} footer={<Button aria-label="确认启动" type="primary" loading={start.isPending} onClick={()=>{if(preview)start.mutate(preview)}}>确认启动</Button>}><ErrorNotice error={start.error}/><p className={styles.previewNote}>核对每一步文本。default 来自默认变量，step:N 来自第 N 步覆盖并沿用。</p><div className={styles.tableShell}><Table size="small" rowKey="index" pagination={false} dataSource={preview?.steps} columns={[{title:'步骤',dataIndex:'index',width:56},{title:'最终文本',dataIndex:'text',width:260},{title:'变量比对',render:(_,s)=><VariableValues values={s.resolvedVars} sources={s.varSources}/>} ]}/></div></Modal><Modal open={createOpen} title="新增序列" onCancel={()=>setCreateOpen(false)} footer={null}><Form layout="vertical" onFinish={(v:{definition:string})=>{try{create.mutate(JSON.parse(v.definition))}catch{setLocalError(new ApiError(400,'VALIDATION_ERROR','序列 JSON 格式错误'))}}}><Form.Item label="序列 JSON" name="definition" initialValue={'{"name":"新序列","steps":[{"index":1,"accountRole":"admin","text":"{event}","delaySeconds":10}]}'} rules={[{required:true}]}><Input.TextArea rows={8}/></Form.Item><Button type="primary" htmlType="submit" loading={create.isPending}>保存序列</Button></Form><ErrorNotice error={create.error??localError}/></Modal></section>
+ const writable=useSession()?.role==='admin',cache=useQueryClient()
+ const definitions=useQuery({queryKey:['sequences'],queryFn:()=>api.request<Sequence[]>('/api/sequences')})
+ const [editing,setEditing]=useState<Sequence|null|undefined>()
+ const save=useMutation({mutationFn:(value:Omit<Sequence,'id'>)=>api.request(editing?'/api/sequences/'+editing.id:'/api/sequences',editing?'PUT':'POST',value),onSuccess:()=>{setEditing(undefined);cache.invalidateQueries({queryKey:['sequences']})}})
+ return <section>
+  <div className={styles.pageHeading}><div><h1>剧本库</h1><p>用 JSON 或可视化编辑步骤，在每个群内选择剧本及参与账号。</p></div>{writable&&<Button type="primary" onClick={()=>{save.reset();setEditing(null)}}>新增剧本</Button>}</div>
+  <ErrorNotice error={definitions.error}/>
+  <Table className={styles.tableShell} scroll={{x:720}} rowKey="id" size="small" dataSource={definitions.data} pagination={false} locale={{emptyText:<LoadState loading={definitions.isLoading} empty={!definitions.isLoading} description="添加包含管理员、普通成员与发送延迟的剧本。"/>}} columns={[
+   {title:'剧本名称',dataIndex:'name'},{title:'步骤数',render:(_,s)=>s.steps.length},{title:'角色',render:(_,s)=>[...new Set(s.steps.map(step=>step.accountRole==='admin'?'管理员':'普通成员'))].join(' / ')},
+   {title:'操作',render:(_,s)=><>{writable&&<Button type="text" onClick={()=>{save.reset();setEditing(s)}}>编辑</Button>}<Link to="/groups">到群内使用</Link></>}
+  ]} expandable={{expandedRowRender:s=><div style={{maxWidth:680,margin:'0 auto',padding:16}}><SequencePreview value={s}/></div>}}/>
+  <Modal width={1320} style={{top:24,maxWidth:'calc(100vw - 32px)'}} open={editing!==undefined} title={editing?'编辑剧本':'新增剧本'} footer={null} onCancel={()=>!save.isPending&&setEditing(undefined)} closable={!save.isPending} maskClosable={false} destroyOnHidden>{editing!==undefined&&<><ErrorNotice error={save.error}/><SequenceEditor key={editing?.id??'new'} initial={editing??undefined} pending={save.isPending} onSave={v=>save.mutate(v)} onGenerate={input=>api.request<GeneratedSequence>('/api/sequences/generate','POST',input)}/></>}</Modal>
+ </section>
 }

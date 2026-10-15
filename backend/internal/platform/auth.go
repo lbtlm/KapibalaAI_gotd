@@ -11,12 +11,12 @@ import (
 )
 
 type authKey struct{}
-type identity struct{ session, role string }
+type identity struct{ session, role, username string }
 
 func hash(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
 func (a *App) authorize(ctx context.Context, token string) (identity, error) {
 	var u identity
-	e := a.pool.QueryRow(ctx, `SELECT s.id,u.role FROM access_tokens t JOIN sessions s ON s.id=t.session_id JOIN users u ON u.username=s.username WHERE t.hash=$1 AND t.expires_at>now() AND NOT s.revoked`, hash(token)).Scan(&u.session, &u.role)
+	e := a.pool.QueryRow(ctx, `SELECT s.id,u.role,u.username FROM access_tokens t JOIN sessions s ON s.id=t.session_id JOIN users u ON u.username=s.username WHERE t.hash=$1 AND t.expires_at>now() AND NOT s.revoked`, hash(token)).Scan(&u.session, &u.role, &u.username)
 	if e == pgx.ErrNoRows {
 		return u, fail(401, "UNAUTHORIZED")
 	}

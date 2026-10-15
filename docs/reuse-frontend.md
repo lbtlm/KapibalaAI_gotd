@@ -1,5 +1,7 @@
 # 前端复用记录
 
+当前实现与测试边界以文末 I19 和账号契约 Revision 5 为准。历史记录中的模拟栈、合成账号/Session、账号/群 route/HTTP 测试实现均已删除，不再是可复用入口；来源记录仅说明当时的演进。
+
 源仓库只读：D:/web_projects/card_code_workspace/go_tg_assistant，源提交 1d7ca2240ec8c41650c27b4c7965baf84cf36a35。本轮先读源 root/frontend AGENTS，实际用 Copy-Item 拷贝下表文件，再原位精简适配。未导入源 .git、Session、生产配置、数据库备份或租户/支付/营销/WebA 模块。
 
 | 原文件（frontend 下） | 当前文件（frontend 下） | 必要适配 |
@@ -27,3 +29,37 @@ Vite、TS与package配置按源React18/Vite工具链重建最小依赖集，不�
 F15 attempt1 revision1（2026-10-15）：在既有 Sequences 的 inspect/start mutation 原位绑定 groupId/input/revision，请求和确认复用同一快照；替代旧成功回调读取可变 group 的路径。服务器 active run 优先，原 runId 改为含所属群的最后运行结果，替代长期覆盖当前运行的选择逻辑。复用原 SequenceProgress、React Query 失效及 MainLayout WS 入口，没有第二套进度/重连模块。新增 PreflightSnapshot 类型用于跨预检/确认保存一次用户输入，revision 用于拒绝已被输入变更淘汰的响应；没有新增业务 API。
 
 B4 复用现有实际栈 Playwright、HTTP 准备和 fake 网关注入；将 C3 建群代码提为同文件 createTestGroup 供 C3/B4 共用，原路径已替换，没有保留重复实现。仅新增覆盖缺失验收窗口的浏览器用例，WS transport fault 转发真实服务消息，不 mock HTTP。Playwright 的 Vite 启动端口原位随 E2E_BASE_URL 选择，默认仍 5173。未复制新仓库模块、未增加依赖、框架或视觉方向。红绿及 3 秒唯一性证据见 tdd-frontend.md 的 F15。
+
+## F16 attempt1 revision1：账号管理（2026-10-15）
+
+复用既有 AccountTableColumns、StatusTag、Feedback、MainLayout 与 React Query 查询失效；账号列表原位扩列与筛选，旧“重连”入口替换为显式“连接并检测”，继续调用既有 A1 transition 处理离线/释放。没有第二套账号连接管理或认证请求入口。仅账号路由去除 content 的 1600px 限宽，其他工作区保持既有布局。
+
+只读交互参考：D:/web_projects/card_code_workspace/go_follow_live，提交 00eb35a56ad1f4bf382e6e3906d35bacd1740376，frontend/src/views/Accounts.vue 的上传/详情入口及 frontend/src/components/AccountDetailModal.vue 的标签分区和群列表。Vue 与当前 React、生命周期和 HTTP DTO 不同，未直接复制代码；未引入源批量运营、账号恢复、删除、自动连接或授权数据。
+
+必要新增 AccountDetails（独立只读查询/群缓存/分页日志）、ImportAccounts（同名配对预览和逐项返回）、AccountGroupManager（单分组 CRUD）分别对应冻结契约，均组合现有 AntD Modal/Tabs/Form/Table/Select 原语。AccountFeedback 在上述多个入口复用账号错误的中文主说明，安全 code 仍可查证；不另造通用表单、上传系统或连接池。配对只读文件名，不在前端解析/打印授权内容。ApiClient 未改动，沿用 Axios 的浏览器 FormData 自动 boundary 行为。
+
+实际栈测试的 Telethon SQLite 表结构参考本批 Niko 的 gateway/account_management_test.go（同一开发快照），由 Node 22 内置 SQLite 在临时目录生成完全合成文件，授权字节不是实际账号，结束删除；不将 Session 文件加入 Git 或证据包。仅新增覆盖缺失公共行为的 UI/HTTP/浏览器测试，无额外依赖。旧账号操作/表头实现已原位替换，没有保留重复入口。
+
+F16验证收尾：新的Node22 SQLite实际上传用例、合成展示布局用例与既有platform真实栈证据分别标明；测试的AntD虚拟选项、zhCN关闭与相对has locator按实际DOM原位修正，没有保留备用测试路径或改生产交互来迁就测试。审查后只扩既有日志动作映射upgrade_disconnect，没有新模块或依赖。
+
+I18（2026-10-15）：日志结果复用既有 StatusTag / statusPositive / statusDanger，仅补 success 中文映射，替代 AccountDetails 内独立 AntD success/error Tag；无新CSS、主题或依赖。所属群空态原位复用 lastSyncedAt 与现有 React Query 缓存，未新增API、数据推断或“补资料”路径。既有同步失败不替换数据的行为保留，并补明确提示。新增AccountDetails公共UI/HTTP边界用例和极小production-browser颜色/空态回归，浏览器身份字段全部null、群数组为空；没有复制新仓库模块或引入真实账号数据。验证及红绿证据见tdd-frontend.md I18。
+I18浏览器证据生成最终复用Playwright testInfo.outputPath/attach，移除固定ignored输出与前置目录依赖；本地runner只负责选择production preview，不是tracked测试的运行前提。
+I18用户名语义补充复用既有verificationSource与列表/详情渲染，只区分“Telegram已读取且为空”和“尚未获取”，两处原位文本分支，没有新类型/API/默认资料或额外模块。
+
+## I19：真实来源与测试边界收敛（2026-10-15）
+
+原位简化Account类型与AccountTableColumns/AccountDetails：仅保留telegram/null来源、待核验/真实核验文字，移除已被替代的模拟检测/资料分支；保留真实手机号/昵称、已读取空用户名、群三态/失败保留、StatusTag、分组、角色与日志。沿用既有日志动作映射，补import_recovered“恢复导入账号”，没有新组件/接口/依赖。Accounts复用既有LoadState，仅明确上传真实Session/JSON。
+
+移除此前新增及旧有的账号/群网关测试替身、NodeSQLite合成Session流程、route展示夹具与注入E2E，不保留备用运行路径。通用认证/WS测试原位去掉借用的业务数据而保留安全断言；Login/AgentRun/auth-cookies及其MSW依赖不属删除范围。没有为保留覆盖而抽取生产内部逻辑或换名伪装Telegram数据。
+
+必要新增为公开来源类型契约和无拦截的真实空系统浏览器验收；复用Playwright启动配置、登录UI、实际API、testInfo输出，默认隔离15173/18080并配置Vite代理。启动器复用主控scripts/local-stack.mjs，不在frontend复制服务管理。当前README替换旧模拟启动指南，历史组件证据标记退役；新测试通过只证明明确覆盖的空系统与权限行为，未覆盖真实故障如实保留未验证。具体命令与red/green见tdd-frontend.md I19。
+I19最终复用既有日志映射增加两条历史数据处理动作的中文显示，无新模块。退出测试定位按现有含图标按钮的可访问名称原位修正；实际空栈两项通过，三个桌面截图保存在本地标准Playwright输出目录，精确自有进程/端口均清理。源码Vite视觉与主控最终production镜像验收分别记录，不混称。
+
+## I21：单账号删除复用（2026-10-15）
+
+Accounts继续集中真实API mutation，复用ApiClient、AccountFeedback、AntD Modal/Button/Tooltip和I20 account-cache。新增AccountDeletion仅承载列表/详情共用的权限/状态按钮与单个有防重锁的确认窗；不把删除塞入A1 transition，不引UI框架/CSS/依赖。removeAccountState复用原缓存模块及失效能力，供本地204与WS account_deleted同用，替代两处独立清理。保留旧业务缓存、原错误码和操作权限。
+
+按用户简化后的Revision8仅同步DELETE，无body/202/pending/CAS/轮询/自动离线；新随机ID隔离由后端负责。纯props/QueryClient测试不构造账号HTTP或网关成功响应；既有真实空系统两用例仅新增不存在ID的幂等与viewer拒绝边界，等待主控schema9交接，不把空系统通过称为真实账号删除验收。来源沿用本仓库现有组件，无外部代码复制。
+
+
+R32 C1: adapted `go_tg_assistant@1d7ca2240ec8c41650c27b4c7965baf84cf36a35/frontend/src/views/weba/components/MessagePanel/StickerMessage.tsx`: visible-only loading, Blob URL cleanup, WebP/WebM/TGS split, lottie-web 5.13.0. Uses native gzip decompression with a size cap and expression-free Lottie, rejects external assets. Reuses ApiClient Bearer refresh, QueryClient invalidation and existing chat styling; no separate media auth system.

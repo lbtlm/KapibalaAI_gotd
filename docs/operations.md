@@ -12,13 +12,13 @@ Compose 的数据库健康依赖与迁移完成依赖按 [Docker 启动顺序规
 | --- | --- | --- |
 | docs | 合法 PR → dev，且全部变更命中明确文档路径 | policy/脚本测试、Gate |
 | light | 合法工作分支 PR → dev 的其他变更 | policy、`backend/internal/domain` 纯 Go unit、前端 unit/typecheck、Gate |
-| full | 同仓 dev → main 发布 PR（包括纯文档），或手动选择 `profile=full` | 原有 PostgreSQL/Go/race/vet、前端 unit/type/build、真实 fake 栈 E2E、镜像构建/冒烟/原制品打包、Gate |
+| full | 同仓 dev → main 发布 PR（包括纯文档），或手动选择 `profile=full` | 原有 PostgreSQL/Go/race/vet、前端 unit/type/build、真实服务空账号 E2E、镜像构建/冒烟/原制品打包、Gate |
 
 light 不启动 PostgreSQL、gateway 服务或 Docker，不运行 race、E2E、`pnpm build` 或独立构建命令，也不生成候选；domain 测试不代表 gateway、PG 或恢复链路已通过。前端 unit/typecheck 作业被 light/full 复用，仅 full 执行 build。手动 full 为可选重验，发布 PR 已产出的原候选可直接用于后述准备流程，无需再完整跑一次。
 
 文档路径仅包括根 `README.md`、`CONTRIBUTING.md`、`AGENTS.md`、`CHANGELOG.md` 和 `docs/` 下 `.md`、`.rst`、`.txt`。PR 使用 base/head 的 merge-base 差异并关闭 rename detection，移动代码到文档仍包含原代码删除路径。空差异或 Git diff 暂不可用时至少执行 light；缺少来源/目标/仓库/SHA 元数据或非法分支则 policy 失败，不能落入 docs。普通文档提交不使用 `[skip ci]`；分支保护保持生效。
 
-full 模式的 Go 作业明确提供真实 PostgreSQL DSN，并在另一数据库 `kapibala_gateway_integration` 启动生产 fake gateway，通过 `GATEWAY_INTEGRATION_URL` 运行实际群生命周期组合测试；gateway writer lease 测试使用 `kapibala_test`，互不争夺同库 writer。作业执行单元/集成、race、vet，并回收自有 gateway PID。前端作业执行 unit/type/build。E2E 使用独立 PostgreSQL、真实 backend、fake gateway、scripted provider 和 Vite。
+full 模式的 Go 作业分别向后端和网关提供独立 PostgreSQL 数据库，执行纯逻辑、真实数据库集成、race 和 vet。前端执行 unit/type/build。E2E 通过 `scripts/local-stack.mjs` 启动真实 backend、空账号 Telegram gateway、既有 provider 和 Vite，检查空账号导入入口、布局及 viewer 权限；不注入 Telegram 响应，不使用 Telegram 凭据。原账号/网关替身及故障注入覆盖已退役，当前 CI 不证明真实 Telegram 发送、群同步或外部失败恢复已验收。
 
 固定 `CI Gate` 使用 `always()` 执行，要求 policy 成功且输出明确档位；docs 要求五个测试/制品作业全部 skipped，light 要求 go_light/frontend success 且 go/e2e/artifact skipped，full 要求 go/frontend/e2e/artifact success 且 go_light skipped。每个预期结果必须精确匹配；失败、取消、缺失、未知档位或其他组合继续阻塞。workflow 整体取消不能生成成功 gate，应保持 required check 未通过。档位输出及作业条件按 GitHub 的 [job outputs](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/pass-job-outputs) 和 [job conditions](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions) 传递；Gate 仍检查 [needs results](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts)。
 
@@ -29,7 +29,7 @@ full 前置检查全部成功才构建 Docker 镜像。产物作业通过 `compo
 - `COMMIT_SHA`：测试和构建的不可变提交 SHA；PR 是 GitHub 测试的 merge SHA。
 - `SHA256SUMS`：以上三个文件的校验值。
 
-[upload-artifact v4](https://github.com/actions/upload-artifact) 的 artifact 本体不可原位修改，同一重跑使用不同 run_attempt 名称。候选保存 14 天，过期需对同 SHA 重新完整 CI，不能宣称旧包仍可下载。不要上传源码目录、数据库、Session、`.local/` 或私有配置；CI 的 browser failure artifacts 仅来自 fake 数据。真实模型 opt-in 测试单独运行、单独验收，普通 CI 不传入 API key。
+[upload-artifact v4](https://github.com/actions/upload-artifact) 的 artifact 本体不可原位修改，同一重跑使用不同 run_attempt 名称。候选保存 14 天，过期需对同 SHA 重新完整 CI，不能宣称旧包仍可下载。不要上传源码目录、数据库、Session、`.local/` 或私有配置；CI 的 browser failure artifacts 仅来自无 Telegram 账号的隔离环境。真实模型 opt-in 测试单独运行、单独验收，普通 CI 不传入 API key。
 
 ## Manual promotion
 
@@ -52,6 +52,8 @@ node scripts/deploy.mjs .local/candidates/<accepted-sha> kapibala-candidate depl
 
 ## Rollback and stop
 
+Gateway 使用 `restart: unless-stopped`。内部存储围栏失效后先关闭旧连接，由容器重启并重新取得唯一写入锁，再恢复已登记账号；不能让旧实例在丢锁后继续发送。`docker compose stop gateway` / `down` 属于显式停止，不会自动拉起。退出日志区分 `signal` 与 `service_unavailable`，写入锁日志只输出检查阶段和错误分类。构建期间仍应保留运行容器，镜像构建成功后才切换目标服务。
+
 每次应用迁移前由操作者备份该项目自己的 PostgreSQL，并记录可恢复的 schema 版本和先前已验收 SHA。备份只存受保护的本地位置，不进 Git/CI。历史候选需提前在本地保留，artifact retention 不是备份策略。
 
 ```powershell
@@ -67,10 +69,14 @@ rollback 使用原 SHA 镜像，不 rebuild、不降级/清空 schema、不删�
 docker compose -f .local/candidates/<accepted-sha>/compose.yaml -p kapibala-candidate down
 ```
 
-不要添加 `--volumes`，也不要运行无 project 范围的清理命令。原生 fake 栈使用 Ctrl+C；Playwright 启动的栈由 Playwright teardown 回收。端口冲突必须由拥有该服务的人处理，脚本不会停止既有监听进程。
+不要添加 `--volumes`，也不要运行无 project 范围的清理命令。原生 `local-stack` 使用 Ctrl+C；Playwright 启动的栈由 Playwright teardown 回收。端口冲突必须由拥有该服务的人处理，脚本不会停止既有监听进程。
 
 ## Secrets and real modes
 
-根 `.env` 与 `.local/` 被 Git 忽略。Docker 示例只用 fake/scripted，真实模式需人工在已授权环境配置进程/秘密挂载和独立数据库；当前 Compose 不自动消费 Telegram manifest 或模型 key。不要把个人身份资料或私有 Session 放入 backend/gateway/frontend build contexts。所有私有配置保存在根 `.local/` 或外部受控路径，构建产物和日志不包含这些文件。
+根 `.env` 与 `.local/` 被 Git 忽略。Docker 网关固定为 Telegram，首次启动没有账号；从页面上传真实 Session+JSON，再明确连接/检测。`gateway-db` 一次性服务只创建缺失的 `kapibala_telegram_gateway`，后端继续使用 `kapibala`。手动部署识别候选的 `gateway-db` 服务并先完成初始化，旧候选和回滚不强制加入该步骤。不要把个人身份资料或私有 Session 放入 backend/gateway/frontend build contexts。所有私有配置保存在根 `.local/` 或外部受控路径，构建产物和日志不包含这些文件。
 
 后端 access/refresh 权限、gateway writer lease、运行恢复的业务验收由组件 TDD 与独立审查提供；运维完整性检查不替代它们。
+
+旧 manifest 环境升级前必须停止网关并备份后端与网关两个数据库，按 [网关说明](../gateway/README.md) 的离线 adopt 命令登记已有凭据。该命令不登录 Telegram，不覆盖最新 Session，不重置事件游标。正常启动只读取持久化登记；缺失或不完整凭据不能当作有效账号连接。旧模拟账号清理须核对凭据、真实验证来源和业务引用，禁止按账号名称批量删除。模型 provider 的既有模式独立配置，本次账号整改未扩展到 provider 产品行为。
+
+本次启动器与部署脚本回归：缺失独立网关 DSN、首次部署未初始化网关库均先复现失败，再修复通过。部署脚本保留原镜像校验、迁移失败保护和回滚不迁移行为；这些脚本检查不替代实际容器启动验收。

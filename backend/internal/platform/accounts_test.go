@@ -6,7 +6,8 @@ import (
 )
 
 func TestConcurrentAccountCASHasOneWinnerAndTerminalCannotReconnect(t *testing.T) {
-	_, s := fixture(t)
+	_, s, cfg := fixtureConfig(t)
+	insertAccountRows(t, cfg, "account-1")
 	token, _ := login(t, s, "admin")
 	var wg sync.WaitGroup
 	statuses := make(chan int, 2)
@@ -14,7 +15,10 @@ func TestConcurrentAccountCASHasOneWinnerAndTerminalCannotReconnect(t *testing.T
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			status, _, _ := call(t, s, "POST", "/api/accounts/account-1/transition", token, `{"to":"suspended","expectedFrom":"idle"}`)
+			status, body, _ := call(t, s, "POST", "/api/accounts/account-1/transition", token, `{"to":"suspended","expectedFrom":"idle"}`)
+			if status == 409 && body["error"].(map[string]any)["code"] != "CAS_CONFLICT" {
+				t.Errorf("concurrent loser must report CAS_CONFLICT: %v", body)
+			}
 			statuses <- status
 		}()
 	}
@@ -33,7 +37,7 @@ func TestConcurrentAccountCASHasOneWinnerAndTerminalCannotReconnect(t *testing.T
 		t.Fatalf("expected one CAS winner: %d/%d", ok, conflict)
 	}
 	st, body, _ := call(t, s, "POST", "/api/accounts/account-1/connect", token, "{}")
-	if st != 409 || body["error"].(map[string]any)["code"] != "ILLEGAL_TRANSITION" {
+	if st != 403 || body["error"].(map[string]any)["code"] != "ACCOUNT_SUSPENDED" {
 		t.Fatalf("terminal reconnected: %d %v", st, body)
 	}
 }

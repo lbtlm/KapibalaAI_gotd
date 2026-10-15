@@ -8,7 +8,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/lbtlm/KapibalaAI_gotd/backend/internal/domain"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -21,6 +20,7 @@ type agentStep struct {
 	Name          *string         `json:"name"`
 	Input         json.RawMessage `json:"input"`
 	ResultSummary string          `json:"resultSummary"`
+	Result        string          `json:"result,omitempty"`
 	IsError       bool            `json:"isError"`
 	ErrorCode     *string         `json:"errorCode"`
 	AuditVerdict  *string         `json:"auditVerdict"`
@@ -34,7 +34,9 @@ type pendingTool struct {
 }
 type agentRun struct {
 	ID             string               `json:"id"`
+	CreatedAt      time.Time            `json:"createdAt"`
 	GroupID        string               `json:"groupId"`
+	AdminAccountID string               `json:"adminAccountId"`
 	Status         string               `json:"status"`
 	EndReason      *string              `json:"endReason"`
 	Summary        *string              `json:"summary"`
@@ -49,7 +51,7 @@ type agentRun struct {
 func (a *App) loadAgent(ctx context.Context, id string) (agentRun, error) {
 	var r agentRun
 	var history, steps, pending json.RawMessage
-	e := a.pool.QueryRow(ctx, `SELECT id,group_id,status,end_reason,summary,history,steps,pending,protocol_errors,elapsed_ms+CASE WHEN status='running' THEN GREATEST(0,(extract(epoch FROM (now()-budget_checkpoint))*1000)::bigint) ELSE 0 END,execution_epoch FROM agent_runs WHERE id=$1`, id).Scan(&r.ID, &r.GroupID, &r.Status, &r.EndReason, &r.Summary, &history, &steps, &pending, &r.ProtocolErrors, &r.ElapsedMS, &r.Epoch)
+	e := a.pool.QueryRow(ctx, `SELECT id,group_id,status,end_reason,summary,history,steps,pending,protocol_errors,elapsed_ms+CASE WHEN status='running' THEN GREATEST(0,(extract(epoch FROM (now()-budget_checkpoint))*1000)::bigint) ELSE 0 END,execution_epoch,COALESCE(admin_account_id,''),created_at FROM agent_runs WHERE id=$1`, id).Scan(&r.ID, &r.GroupID, &r.Status, &r.EndReason, &r.Summary, &history, &steps, &pending, &r.ProtocolErrors, &r.ElapsedMS, &r.Epoch, &r.AdminAccountID, &r.CreatedAt)
 	if e == pgx.ErrNoRows {
 		return r, fail(404, "AGENT_RUN_NOT_FOUND")
 	}
@@ -71,6 +73,24 @@ func (a *App) agentGet(w http.ResponseWriter, r *http.Request) error {
 	run, e := a.loadAgent(r.Context(), r.PathValue("id"))
 	if e != nil {
 		return e
+	}
+	// Tool results already live in history. Enrich this read DTO without storing
+	// a second copy or exposing the private model conversation.
+	results := map[string]string{}
+	for _, message := range run.History {
+		if message.Role != "user" {
+			continue
+		}
+		for _, block := range message.Content {
+			if block.Type == "tool_result" {
+				results[block.ToolUseID] = block.Content
+			}
+		}
+	}
+	for i := range run.Steps {
+		if id := run.Steps[i].ToolUseID; id != nil {
+			run.Steps[i].Result = results[*id]
+		}
 	}
 	respond(w, 200, run)
 	return nil
@@ -107,7 +127,7 @@ func (a *App) saveAgent(ctx context.Context, r *agentRun) error {
 	if r.Pending == nil || r.Status != "running" {
 		var enabled bool
 		var status string
-		if e = tx.QueryRow(ctx, `SELECT agent_enabled,status FROM groups WHERE id=$1 FOR SHARE`, r.GroupID).Scan(&enabled, &status); e != nil {
+		if e = tx.QueryRow(ctx, `SELECT agent_enabled AND NOT marketing_paused,status FROM groups WHERE id=$1 FOR SHARE`, r.GroupID).Scan(&enabled, &status); e != nil {
 			return e
 		}
 		if !enabled || status != "active" {
@@ -131,16 +151,6 @@ func truncateRunes(s string, n int) string {
 	r := []rune(s)
 	if len(r) > n {
 		return string(r[:n])
-	}
-	return s
-}
-func truncateBytes(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	s = s[:n]
-	for !utf8.ValidString(s) {
-		s = s[:len(s)-1]
 	}
 	return s
 }
@@ -168,7 +178,8 @@ func (a *App) createAgentRuns(ctx context.Context) {
 		}
 		var enabled bool
 		var status string
-		e = tx.QueryRow(ctx, `SELECT agent_enabled,status FROM groups WHERE id=$1 FOR UPDATE`, groupID).Scan(&enabled, &status)
+		var admin *string
+		e = tx.QueryRow(ctx, `SELECT agent_enabled AND NOT marketing_paused,status,admin_account_id FROM groups WHERE id=$1 FOR UPDATE`, groupID).Scan(&enabled, &status, &admin)
 		if e != nil {
 			tx.Rollback(ctx)
 			continue
@@ -179,12 +190,12 @@ func (a *App) createAgentRuns(ctx context.Context) {
 			continue
 		}
 		var active bool
-		tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE group_id=$1 AND status='running')`, groupID).Scan(&active)
+		tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE group_id=$1 AND status='running') OR EXISTS(SELECT 1 FROM jobs WHERE group_id=$1 AND status='running' AND kind IN ('create','promote','leave'))`, groupID).Scan(&active)
 		if active {
 			tx.Rollback(ctx)
 			continue
 		}
-		rows, e := tx.Query(ctx, `SELECT m.msg_id,m.sender_platform_user_id,m.text,m.sent_at FROM messages m JOIN agent_pending p ON p.group_id=m.group_id AND p.msg_id=m.msg_id WHERE p.group_id=$1 ORDER BY m.sent_at,m.id`, groupID)
+		rows, e := tx.Query(ctx, `SELECT m.msg_id,m.sender_platform_user_id,m.text,m.sent_at FROM messages m JOIN agent_pending p ON p.group_id=m.group_id AND p.msg_id=m.msg_id WHERE p.group_id=$1 AND NOT m.is_own ORDER BY m.sent_at,m.id`, groupID)
 		if e != nil {
 			tx.Rollback(ctx)
 			continue
@@ -197,6 +208,11 @@ func (a *App) createAgentRuns(ctx context.Context) {
 			trigger = append(trigger, map[string]any{"msgId": msg, "senderPlatformUserId": sender, "text": text, "sentAt": sent})
 		}
 		rows.Close()
+		if len(trigger) == 0 {
+			tx.Exec(ctx, `DELETE FROM agent_pending WHERE group_id=$1`, groupID)
+			tx.Commit(ctx)
+			continue
+		}
 		var autoKick bool
 		tx.QueryRow(ctx, `SELECT auto_kick_enabled FROM groups WHERE id=$1`, groupID).Scan(&autoKick)
 		own := []string{}
@@ -211,10 +227,20 @@ func (a *App) createAgentRuns(ctx context.Context) {
 			own = append(own, p)
 		}
 		rows.Close()
-		payload, _ := json.Marshal(map[string]any{"groupId": groupID, "triggerMessages": trigger, "policy": map[string]any{"autoKickEnabled": autoKick}, "ownPlatformUserIds": own})
+		conversation, e := a.recentMessages(ctx, groupID, 20)
+		if e != nil {
+			tx.Rollback(ctx)
+			continue
+		}
+		var summary string
+		if e = tx.QueryRow(ctx, `SELECT COALESCE((SELECT summary FROM agent_runs WHERE group_id=$1 AND status='finished' ORDER BY created_at DESC,id DESC LIMIT 1),'')`, groupID).Scan(&summary); e != nil {
+			tx.Rollback(ctx)
+			continue
+		}
+		payload, _ := json.Marshal(map[string]any{"groupId": groupID, "agentSessionId": "group-agent:" + groupID, "conversation": conversation, "previousSummary": truncateRunes(summary, 2000), "triggerMessages": trigger, "policy": map[string]any{"autoKickEnabled": autoKick}, "ownPlatformUserIds": own})
 		id := ID()
 		history := []domain.ChatMessage{{Role: "user", Content: []domain.Block{{Type: "text", Text: string(payload)}}}}
-		if _, e = tx.Exec(ctx, `INSERT INTO agent_runs(id,group_id,history) VALUES($1,$2,$3)`, id, groupID, history); e == nil {
+		if _, e = tx.Exec(ctx, `INSERT INTO agent_runs(id,group_id,history,admin_account_id) VALUES($1,$2,$3,$4)`, id, groupID, history, admin); e == nil {
 			_, e = tx.Exec(ctx, `DELETE FROM agent_pending WHERE group_id=$1`, groupID)
 		}
 		if e == nil {
@@ -230,13 +256,7 @@ func (a *App) createAgentRuns(ctx context.Context) {
 func (a *App) agentTick(ctx context.Context) {
 	a.createAgentRuns(ctx)
 	for _, id := range a.ids(ctx, `SELECT id FROM agent_runs WHERE status='running'`) {
-		a.wg.Add(1)
-		go func(id string) {
-			defer a.wg.Done()
-			if e := a.lock(ctx, "agent:"+id, func(ctx context.Context) error { return a.executeAgent(ctx, id) }); e != nil && ctx.Err() == nil {
-				slog.Warn("agent checkpoint retrying", "runId", id, "error", e)
-			}
-		}(id)
+		a.launchWorker(ctx, "agent:"+id, func(ctx context.Context) error { return a.executeAgent(ctx, id) })
 	}
 }
 func (a *App) turn(ctx context.Context, r *agentRun) ([]byte, string) {
@@ -298,7 +318,7 @@ func (a *App) executeAgent(ctx context.Context, id string) error {
 	for ctx.Err() == nil && r.Status == "running" {
 		var enabled bool
 		var groupStatus string
-		if e = a.pool.QueryRow(ctx, `SELECT agent_enabled,status FROM groups WHERE id=$1`, r.GroupID).Scan(&enabled, &groupStatus); e != nil {
+		if e = a.pool.QueryRow(ctx, `SELECT agent_enabled AND NOT marketing_paused,status FROM groups WHERE id=$1`, r.GroupID).Scan(&enabled, &groupStatus); e != nil {
 			return e
 		}
 		if r.Pending == nil {
@@ -322,7 +342,7 @@ func (a *App) executeAgent(ctx context.Context, id string) error {
 			if ctx.Err() != nil {
 				if ctx.Err() == context.DeadlineExceeded && parent.Err() == nil {
 					timeout := "TURN_TIMEOUT"
-					r.Steps = append(r.Steps, agentStep{Kind: "protocol_error", ResultSummary: timeout, IsError: true, ErrorCode: &timeout, RawResponse: truncateBytes(string(raw), 2048)})
+					r.Steps = append(r.Steps, agentStep{Kind: "protocol_error", ResultSummary: timeout, IsError: true, ErrorCode: &timeout, RawResponse: string(raw)})
 					endAgent(&r, "wall_clock", "")
 					return a.saveAgent(parent, &r)
 				}
@@ -341,7 +361,7 @@ func (a *App) executeAgent(ctx context.Context, id string) error {
 				}
 			}
 			if code != "" {
-				r.Steps = append(r.Steps, agentStep{Kind: "protocol_error", ResultSummary: code, IsError: true, ErrorCode: &code, RawResponse: truncateBytes(string(raw), 2048)})
+				r.Steps = append(r.Steps, agentStep{Kind: "protocol_error", ResultSummary: code, IsError: true, ErrorCode: &code, RawResponse: string(raw)})
 				r.History = append(r.History, domain.ChatMessage{Role: "user", Content: []domain.Block{{Type: "text", Text: "PROTOCOL_ERROR " + code + ": invalid agent response"}}})
 				r.ProtocolErrors++
 				if e = checkpoint(); e != nil {
@@ -352,13 +372,13 @@ func (a *App) executeAgent(ctx context.Context, id string) error {
 			b := out.Content[0]
 			if out.StopReason == "end_turn" {
 				r.ProtocolErrors = 0
-				r.Steps = append(r.Steps, agentStep{Kind: "final", ResultSummary: truncateRunes(b.Text, 200), RawResponse: truncateBytes(string(raw), 2048)})
+				r.Steps = append(r.Steps, agentStep{Kind: "final", ResultSummary: truncateRunes(b.Text, 200), RawResponse: string(raw)})
 				endAgent(&r, "final", b.Text)
 				return checkpoint()
 			}
 			r.History = append(r.History, domain.ChatMessage{Role: "assistant", Content: []domain.Block{b}})
 			toolID, name := b.ID, b.Name
-			r.Steps = append(r.Steps, agentStep{Kind: "tool_use", ToolUseID: &toolID, Name: &name, Input: b.Input, RawResponse: truncateBytes(string(raw), 2048)})
+			r.Steps = append(r.Steps, agentStep{Kind: "tool_use", ToolUseID: &toolID, Name: &name, Input: b.Input, RawResponse: string(raw)})
 			r.Pending = &pendingTool{Block: b, Stage: "validate"}
 			if e = checkpoint(); e != nil {
 				return e
@@ -623,9 +643,9 @@ func (a *App) agentSend(ctx context.Context, r *agentRun, input map[string]any) 
 		return nil, "", e
 	}
 	var account string
-	e = tx.QueryRow(ctx, `SELECT a.id FROM accounts a JOIN members m ON m.account_id=a.id WHERE m.group_id=$1 AND a.status='online' ORDER BY a.id LIMIT 1`, r.GroupID).Scan(&account)
+	e = tx.QueryRow(ctx, `SELECT a.id FROM accounts a JOIN members m ON m.account_id=a.id JOIN groups g ON g.id=m.group_id WHERE m.group_id=$1 AND a.id=$2 AND a.status='online' AND m.role IN ('admin','creator') AND g.status='active' AND g.agent_enabled AND NOT g.marketing_paused FOR SHARE OF g`, r.GroupID, r.AdminAccountID).Scan(&account)
 	if e == pgx.ErrNoRows {
-		return toolError("NO_AVAILABLE_ACCOUNT"), "NO_AVAILABLE_ACCOUNT", nil
+		return toolError("ADMIN_UNAVAILABLE"), "ADMIN_UNAVAILABLE", nil
 	}
 	if e != nil {
 		return nil, "", e
@@ -652,7 +672,8 @@ func (a *App) agentKick(ctx context.Context, r *agentRun, b domain.Block, input 
 	if e == nil && state == "done" {
 		var out map[string]any
 		json.Unmarshal(result, &out)
-		return out, "", nil
+		code, _ := out["code"].(string)
+		return out, code, nil
 	}
 	if e != nil && e != pgx.ErrNoRows {
 		return nil, "", e
@@ -667,9 +688,9 @@ func (a *App) agentKick(ctx context.Context, r *agentRun, b domain.Block, input 
 		Key         string `json:"idempotencyKey"`
 	}
 	if state == "" {
-		e = a.pool.QueryRow(ctx, `SELECT a.id FROM accounts a JOIN members m ON m.account_id=a.id WHERE m.group_id=$1 AND a.status='online' AND m.role IN ('creator','admin') ORDER BY CASE WHEN m.role='admin' THEN 0 ELSE 1 END,a.id LIMIT 1`, r.GroupID).Scan(&intent.ByAccountID)
+		e = a.pool.QueryRow(ctx, `SELECT a.id FROM accounts a JOIN members m ON m.account_id=a.id JOIN groups g ON g.id=m.group_id WHERE m.group_id=$1 AND a.id=$2 AND a.status='online' AND m.role IN ('creator','admin') AND g.status='active' AND g.agent_enabled AND NOT g.marketing_paused`, r.GroupID, r.AdminAccountID).Scan(&intent.ByAccountID)
 		if e == pgx.ErrNoRows {
-			return toolError("NO_AVAILABLE_ACCOUNT"), "NO_AVAILABLE_ACCOUNT", nil
+			return toolError("ADMIN_UNAVAILABLE"), "ADMIN_UNAVAILABLE", nil
 		}
 		if e != nil {
 			return nil, "", e
@@ -683,6 +704,13 @@ func (a *App) agentKick(ctx context.Context, r *agentRun, b domain.Block, input 
 		defer tx.Rollback(ctx)
 		if e = agentFence(ctx, tx, r); e != nil {
 			return nil, "", e
+		}
+		var enabled bool
+		if e = tx.QueryRow(ctx, `SELECT agent_enabled AND NOT marketing_paused AND status='active' FROM groups WHERE id=$1 FOR SHARE`, r.GroupID).Scan(&enabled); e != nil {
+			return nil, "", e
+		}
+		if !enabled {
+			return toolError("MARKETING_ENDED"), "MARKETING_ENDED", nil
 		}
 		tag, e := tx.Exec(ctx, `INSERT INTO agent_effects(run_id,key,kind,state,input) VALUES($1,$2,'kick','inflight',$3) ON CONFLICT DO NOTHING`, r.ID, key, intent)
 		if e != nil {
@@ -723,7 +751,9 @@ func (a *App) agentKick(ctx context.Context, r *agentRun, b domain.Block, input 
 		if code != "OWNER_LEFT" && code != "NO_PERMISSION" {
 			code = "SEND_FAILED"
 		}
-		return toolError(code), code, nil
+		out := toolError(code)
+		_, e = a.pool.Exec(ctx, `UPDATE agent_effects SET state='done',result=$3 WHERE run_id=$1 AND key=$2`, r.ID, key, out)
+		return out, code, e
 	}
 	out := map[string]any{"kicked": true}
 	_, e = a.pool.Exec(ctx, `UPDATE agent_effects SET state='done',result=$3 WHERE run_id=$1 AND key=$2`, r.ID, key, out)

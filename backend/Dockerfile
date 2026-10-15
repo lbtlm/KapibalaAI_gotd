@@ -5,7 +5,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o /out/server ./cmd/server && CGO_ENABLED=0 go build -trimpath -o /out/migrate ./cmd/migrate && CGO_ENABLED=0 go build -trimpath -o /out/agent ./cmd/agent
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates && adduser -D -u 10001 app
+RUN apk add --no-cache ca-certificates && adduser -D -u 10001 app && mkdir -p /app/media && chown app:app /app/media
 COPY --from=build /out/ /app/
 USER app
 WORKDIR /app

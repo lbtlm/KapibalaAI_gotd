@@ -3,11 +3,46 @@ package platform
 import (
 	"context"
 	"hash/fnv"
+	"log/slog"
+	"strings"
 	"time"
 )
 
-func (a *App) ids(ctx context.Context, query string) []string {
-	rows, e := a.pool.Query(ctx, query)
+// One local goroutine per durable work key; the existing database lease fences
+// other processes. All workers inherit cancellation and join App.Close.
+func (a *App) launchWorker(ctx context.Context, key string, fn func(context.Context) error) {
+	a.workMu.Lock()
+	// Reserve send capacity even when agents are waiting for send receipts.
+	// At most 14 workers (including two media transfers) use lease + business connections in the 32-slot pool.
+	kind, _, _ := strings.Cut(key, ":")
+	limit := 4
+	if kind == "job" || kind == "sequence" || kind == "media" {
+		limit = 2
+	}
+	count := 0
+	for active := range a.running {
+		if strings.HasPrefix(active, kind+":") {
+			count++
+		}
+	}
+	if ctx.Err() != nil || a.running[key] || count >= limit {
+		a.workMu.Unlock()
+		return
+	}
+	a.running[key] = true
+	a.workMu.Unlock()
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		defer func() { a.workMu.Lock(); delete(a.running, key); a.workMu.Unlock() }()
+		if e := a.lock(ctx, key, fn); e != nil && ctx.Err() == nil {
+			slog.Warn("worker checkpoint retrying", "work", key, "error", e)
+		}
+	}()
+}
+
+func (a *App) ids(ctx context.Context, query string, args ...any) []string {
+	rows, e := a.pool.Query(ctx, query, args...)
 	if e != nil {
 		return nil
 	}

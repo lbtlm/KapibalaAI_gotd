@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lbtlm/KapibalaAI_gotd/backend/internal/migration"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,8 @@ import (
 type Config struct {
 	DatabaseURL, GatewayURL, AgentURL string
 	TurnTimeout                       time.Duration
+	MediaDir                          string
+	MediaRetention                    time.Duration
 }
 type App struct {
 	pool    *pgxpool.Pool
@@ -30,8 +33,8 @@ type App struct {
 	alertMu sync.Mutex
 	alerts  []alert
 	scope   string
-	sendMu  sync.Mutex
-	sending map[string]bool
+	workMu  sync.Mutex
+	running map[string]bool
 	runtime *pgx.Conn
 }
 
@@ -63,12 +66,22 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	if cfg.TurnTimeout == 0 {
 		cfg.TurnTimeout = 12 * time.Second
 	}
+	if cfg.MediaDir == "" {
+		cfg.MediaDir = "media"
+	}
+	if cfg.MediaRetention <= 0 {
+		cfg.MediaRetention = 30 * 24 * time.Hour
+	}
+	if e = os.MkdirAll(cfg.MediaDir, 0700); e != nil {
+		p.Close()
+		return nil, e
+	}
 	var scope string
 	if e = p.QueryRow(ctx, `SELECT current_schema()`).Scan(&scope); e != nil {
 		p.Close()
 		return nil, e
 	}
-	return &App{pool: p, cfg: cfg, schema: v, client: &http.Client{Timeout: 12 * time.Second}, scope: scope, sending: map[string]bool{}}, nil
+	return &App{pool: p, cfg: cfg, schema: v, client: &http.Client{Timeout: 12 * time.Second}, scope: scope, running: map[string]bool{}}, nil
 }
 func (a *App) Close() {
 	if a.cancel != nil {
@@ -83,7 +96,8 @@ func (a *App) Start(ctx context.Context) error {
 		a.cancel()
 		return e
 	}
-	a.wg.Add(8)
+	a.wg.Add(9)
+	go a.loop(ctx, time.Second, a.mediaTick)
 	go a.watchRuntime(ctx)
 	go a.eventsStream(ctx)
 	go a.loop(ctx, 100*time.Millisecond, a.inboxTick)
@@ -159,6 +173,19 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("POST /api/auth/refresh", a.wrap(a.refresh, true))
 	m.HandleFunc("POST /api/auth/logout", a.wrap(a.logout, false))
 	m.HandleFunc("GET /api/accounts", a.wrap(a.accounts, false))
+	m.HandleFunc("POST /api/accounts/import", a.wrap(a.importAccounts, false))
+	m.HandleFunc("GET /api/accounts/{id}", a.wrap(a.accountGet, false))
+	m.HandleFunc("DELETE /api/accounts/{id}", a.wrap(a.deleteAccount, false))
+	m.HandleFunc("GET /api/accounts/{id}/logs", a.wrap(a.accountLogs, false))
+	m.HandleFunc("POST /api/accounts/{id}/check", a.wrap(a.checkAccount, false))
+	m.HandleFunc("GET /api/accounts/{id}/joined-groups", a.wrap(a.joinedGroups, false))
+	m.HandleFunc("POST /api/accounts/{id}/joined-groups/sync", a.wrap(a.syncJoinedGroups, false))
+	m.HandleFunc("POST /api/accounts/{id}/join", a.wrap(a.joinAccountGroup, false))
+	m.HandleFunc("GET /api/account-groups", a.wrap(a.accountGroups, false))
+	m.HandleFunc("POST /api/account-groups", a.wrap(a.createAccountGroup, false))
+	m.HandleFunc("PATCH /api/account-groups/{id}", a.wrap(a.renameAccountGroup, false))
+	m.HandleFunc("DELETE /api/account-groups/{id}", a.wrap(a.deleteAccountGroup, false))
+	m.HandleFunc("POST /api/account-groups/move", a.wrap(a.moveAccounts, false))
 	m.HandleFunc("POST /api/accounts/{id}/connect", a.wrap(a.connect, false))
 	m.HandleFunc("POST /api/accounts/{id}/transition", a.wrap(a.manualTransition, false))
 	m.HandleFunc("POST /api/groups", a.wrap(a.createGroup, false))
@@ -166,16 +193,26 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/groups/{id}", a.wrap(a.groupGet, false))
 	m.HandleFunc("PATCH /api/groups/{id}", a.wrap(a.patchGroup, false))
 	m.HandleFunc("POST /api/groups/{id}/leave-all", a.wrap(a.leaveAll, false))
+	m.HandleFunc("POST /api/groups/{id}/{action}", a.wrap(a.groupMemberJob, false))
+	m.HandleFunc("GET /api/groups/{id}/jobs", a.wrap(a.groupJobs, false))
 	m.HandleFunc("GET /api/jobs/{id}", a.wrap(a.jobGet, false))
 	m.HandleFunc("POST /api/groups/import", a.wrap(a.importGroup, false))
 	m.HandleFunc("GET /ws", a.ws)
 	m.HandleFunc("POST /api/groups/{id}/send", a.wrap(a.send, false))
 	m.HandleFunc("GET /api/groups/{id}/messages", a.wrap(a.messages, false))
+	m.HandleFunc("GET /api/media/{id}", a.wrap(a.mediaGet, false))
+	m.HandleFunc("POST /api/media/{id}/retry", a.wrap(a.mediaRetry, false))
 	m.HandleFunc("POST /api/sequences", a.wrap(a.createSequence, false))
+	m.HandleFunc("POST /api/sequences/generate", a.wrap(a.generateSequence, false))
+	m.HandleFunc("PUT /api/sequences/{id}", a.wrap(a.createSequence, false))
 	m.HandleFunc("GET /api/sequences", a.wrap(a.sequences, false))
 	m.HandleFunc("POST /api/groups/{id}/sequence-runs", a.wrap(a.startSequence, false))
+	m.HandleFunc("GET /api/groups/{id}/sequence-runs", a.wrap(a.sequenceHistory, false))
 	m.HandleFunc("POST /api/groups/{id}/sequence-runs/preview", a.wrap(a.previewSequence, false))
 	m.HandleFunc("GET /api/sequence-runs/{id}", a.wrap(a.sequenceRun, false))
+	m.HandleFunc("GET /api/agent/status", a.wrap(a.agentStatus, false))
+	m.HandleFunc("POST /api/groups/{id}/marketing/{action}", a.wrap(a.marketing, false))
+	m.HandleFunc("POST /api/agent/reply-preview", a.wrap(a.previewAgentReply, false))
 	m.HandleFunc("GET /api/agent-runs/{id}", a.wrap(a.agentGet, false))
 	m.HandleFunc("GET /api/groups/{id}/agent-runs", a.wrap(a.agentList, false))
 	return m

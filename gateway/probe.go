@@ -3,8 +3,6 @@ package gateway
 import (
 	"context"
 	"database/sql"
-	"errors"
-	"github.com/gotd/td/session"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
@@ -41,19 +39,7 @@ func probeAccounts(ctx context.Context, db *sql.DB, configs []AccountConfig, use
 	for _, c := range configs {
 		r := ProbeResult{AccountID: c.ID}
 		storage := dbSession{db, c.ID}
-		if _, e := storage.LoadSession(ctx); errors.Is(e, session.ErrNotFound) {
-			b, e := ImportSession(c.SessionPath, c.SessionFormat, c.Passcode)
-			if e != nil {
-				r.Code = "SESSION_IMPORT_FAILED"
-				results = append(results, r)
-				continue
-			}
-			if e = storage.StoreSession(ctx, b); e != nil {
-				r.Code = "SESSION_STORAGE_FAILED"
-				results = append(results, r)
-				continue
-			}
-		} else if e != nil {
+		if _, e := storage.LoadSession(ctx); e != nil {
 			r.Code = "SESSION_STORAGE_FAILED"
 			results = append(results, r)
 			continue
