@@ -7,7 +7,7 @@ export interface AccountLog { id: string; actor: string; action: string; result:
 export interface AccountLogPage { items: AccountLog[]; nextCursor: string | null }
 export interface AccountImportResult { basename: string; accountId: string | null; success: boolean; error: {code:string;message:string} | null }
 export interface Member { accountId: string | null; platformUserId: string; role: 'creator' | 'admin' | 'member' }
-export interface Group { id: string; title?:string; username?:string; inviteLink?:string; adminAccountId?:string|null; sequenceConfig?:SequenceInput|null; gatewayGroupId: string; status: 'active' | 'unreachable' | 'ending' | 'left'; creatorAccountId: string | null; agentEnabled: boolean; autoKickEnabled: boolean; members: Member[]; activeSequenceRunId: string | null; activeAgentRunId: string | null; activeJobId?:string|null }
+export interface Group { id: string; marketingPaused?:boolean; agentSessionId?:string; title?:string; username?:string; inviteLink?:string; adminAccountId?:string|null; sequenceConfig?:SequenceInput|null; gatewayGroupId: string; status: 'active' | 'unreachable' | 'ending' | 'left'; creatorAccountId: string | null; agentEnabled: boolean; autoKickEnabled: boolean; members: Member[]; activeSequenceRunId: string | null; activeAgentRunId: string | null; activeJobId?:string|null }
 export interface Message { msgId: string | null; clientMsgId: string | null; senderPlatformUserId: string; isOwn: boolean; text: string; sentAt: string; deliveryStatus: string | null; failCode: string | null }
 export interface MessagePage { items: Message[]; nextCursor: string | null }
 export interface AgentStep { kind: string; toolUseId: string | null; name: string | null; input: unknown; resultSummary: string; isError: boolean; errorCode: string | null; auditVerdict: string | null; rawResponse: string }
@@ -17,5 +17,3 @@ export interface SequenceInput { sequenceId: string; vars: Record<string,string>
 export interface PreviewStep { index: number; text: string; accountId?:string|null; accountRole?:'admin'|'member'; delaySeconds?:number; resolvedVars: Record<string,string>; varSources: Record<string,string> }
 export interface SequenceRun { status: string; currentStepIndex: number; steps: (PreviewStep & { status: string; scheduledAt: string | null; sentAt: string | null; clientMsgId: string | null })[] }
 export interface Job { id?:string; kind?:string; groupId?:string; phase?:string; position?:number; total?:number; createdAt?:string; status: 'running' | 'finished' | 'failed'; errors: { step: string; code: string }[]; logs?:{at:string;phase:string;result:string;accountId?:string;position?:number;code?:string}[] }
-
-

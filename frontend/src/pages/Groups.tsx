@@ -10,6 +10,7 @@ import {accountLabel} from '../components/AccountTableColumns'
 import {ErrorNotice,LoadState} from '../components/Feedback'
 import ImportGroup from '../components/ImportGroup'
 import JobFeedback from '../components/JobFeedback'
+import EndMarketingButton from '../components/EndMarketingButton'
 import styles from '../layout/MainLayout.module.scss'
 
 export default function Groups() {
@@ -30,8 +31,9 @@ export default function Groups() {
    {title:'群主',render:(_,g)=>label(g.creatorAccountId)},
    {title:'管理员 / Agent 身份',render:(_,g)=>label(g.adminAccountId)},
    {title:'成员',render:(_,g)=>g.members.length},
-   {title:'Agent',render:(_,g)=>g.agentEnabled?'已启用':'已关闭'},
-   {title:'运行',render:(_,g)=><Space>{g.activeSequenceRunId&&<StatusTag status="running"/>}{g.activeAgentRunId?'Agent 执行中':!g.activeSequenceRunId?'空闲':''}</Space>}
+   {title:'Agent',render:(_,g)=>g.marketingPaused?'已暂停':g.agentEnabled?'持续待命':'已关闭'},
+   {title:'运行',render:(_,g)=><Space>{g.activeSequenceRunId&&<StatusTag status="running"/>}{g.activeAgentRunId?'Agent 执行中':!g.activeSequenceRunId?'空闲':''}</Space>},
+   {title:'操作',key:'actions',fixed:'right',width:250,render:(_,g)=><Space size={4}><Link to={'/groups/'+g.id}>进入管理</Link>{session?.role==='admin'&&<EndMarketingButton group={g} compact onStarted={setJob}/>}</Space>}
   ]}/></div>
   <Modal title="创建群组" open={open} footer={null} onCancel={()=>setOpen(false)}>
    <Form form={form} layout="vertical" initialValues={{privateOnConflict:true}} onFinish={v=>create.mutate(v)}>
