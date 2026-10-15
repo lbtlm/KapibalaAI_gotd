@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	gateway "github.com/lbtlm/KapibalaAI_gotd/gateway"
+	gateway "github.com/lbtlm/KapibalaAI_gotd/gateway/internal/gateway"
 	"log/slog"
 	"net/http"
 	"os"

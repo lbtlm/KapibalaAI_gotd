@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	gateway "github.com/lbtlm/KapibalaAI_gotd/gateway"
+	gateway "github.com/lbtlm/KapibalaAI_gotd/gateway/internal/gateway"
 )
 
 func testDSN(t *testing.T) string {

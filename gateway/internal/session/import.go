@@ -1,11 +1,10 @@
-package gateway
+package session
 
 import (
 	"archive/zip"
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	_ "github.com/glebarez/go-sqlite"
 	"github.com/gotd/td/crypto"
@@ -144,53 +143,4 @@ func loadTdataZIP(b []byte, passcode string) (*session.Data, error) {
 		return nil, fmt.Errorf("expected exactly one tdata account")
 	}
 	return session.TDesktopSession(accounts[0])
-}
-
-type dbSession struct {
-	db *sql.DB
-	id string
-}
-
-func (d dbSession) LoadSession(ctx context.Context) ([]byte, error) {
-	var b []byte
-	err := d.db.QueryRowContext(ctx, "SELECT data FROM gateway_sessions WHERE account_id=$1", d.id).Scan(&b)
-	if err == sql.ErrNoRows {
-		return nil, session.ErrNotFound
-	}
-	return b, err
-}
-func (d dbSession) StoreSession(ctx context.Context, b []byte) error {
-	result, err := d.db.ExecContext(ctx, "UPDATE gateway_sessions SET data=$2 WHERE account_id=$1", d.id, b)
-	if err != nil {
-		return err
-	}
-	n, err := result.RowsAffected()
-	if err == nil && n != 1 {
-		return session.ErrNotFound
-	}
-	return err
-}
-
-// AccountConfig contains per-account credentials in an ignored configuration file.
-type AccountConfig struct {
-	ID            string `json:"id"`
-	APIID         int    `json:"apiId"`
-	APIHash       string `json:"apiHash"`
-	SessionPath   string `json:"sessionPath"`
-	SessionFormat string `json:"sessionFormat"`
-	Passcode      string `json:"passcode,omitempty"`
-	DeviceModel   string `json:"deviceModel,omitempty"`
-	SystemVersion string `json:"systemVersion,omitempty"`
-	AppVersion    string `json:"appVersion,omitempty"`
-}
-
-// LoadAccountConfigs reads an explicitly selected ignored private file.
-func LoadAccountConfigs(path string) ([]AccountConfig, error) {
-	b, e := os.ReadFile(path)
-	if e != nil {
-		return nil, e
-	}
-	var c []AccountConfig
-	e = json.Unmarshal(b, &c)
-	return c, e
 }

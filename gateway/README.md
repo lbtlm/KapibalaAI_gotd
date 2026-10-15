@@ -4,16 +4,32 @@ Go 1.24 gateway for the section 2.1 HTTP/SSE contract, using pinned gotd v0.112.
 
 ## Package layout
 
-`gateway/` is one Go module. Its root source files share `package gateway`; the executable entry points are in `cmd/gateway`, `cmd/adopt` and `cmd/probe`. Tests stay beside the behavior they cover.
+`gateway/` is one Go module. Executable entry points stay in `cmd/`; implementation packages are private to this module under `internal/`. Tests stay beside the behavior they cover.
 
-| Files | Responsibility |
+```text
+gateway/
+├── cmd/
+│   ├── gateway/        # HTTP/SSE service
+│   ├── adopt/          # Explicit offline credential adoption
+│   └── probe/          # Explicit account diagnostics
+├── internal/
+│   ├── gateway/        # Service, lifecycle, business state and recovery
+│   ├── session/        # Read-only Session format conversion
+│   ├── storage/        # SDK Session, update cursors and writer error contract
+│   └── ops/            # Reused Telegram operation primitives
+├── go.mod
+├── go.sum
+└── Dockerfile
+```
+
+| Package | Responsibility |
 | --- | --- |
-| `server.go`, `account_*.go`, `groups.go` | HTTP endpoints and account/group operations |
-| `telegram*.go`, `session.go`, `media.go` | gotd connections, Session conversion, platform operations and media |
-| `postgres.go`, `store.go`, `update_storage.go` | PostgreSQL persistence and writer ownership |
-| `events.go`, `update_pipeline.go`, `*_recovery.go` | Event delivery, update processing and effect recovery |
+| `internal/gateway` | HTTP/SSE, account and group operations, gotd lifecycle, media, business snapshots, credential transactions and effect recovery |
+| `internal/session` | Telethon SQLite, gotd JSON and tdata ZIP conversion; never rewrites the source Session |
+| `internal/storage` | gotd Session storage and update cursors; checkpoint writes use the supplied writer fence and ingestion failure gate |
+| `internal/ops` | Existing gotd group, channel and message operation helpers |
 
-This is a valid single-package layout, but the service and Telegram adapter currently share state and call each other. Moving these files into subdirectories would create new package boundaries and require dependency changes. Further growth should extract cohesive, independently testable capabilities into `internal/` incrementally, beginning with Session conversion or storage; preserve writer fencing and recovery tests when doing so. See the [Go module layout guide](https://go.dev/doc/modules/layout). No package refactor is part of the current delivery cleanup.
+Dependencies flow from `cmd` to `internal/gateway`, then to the three supporting packages. Supporting packages do not import the service. The service retains ownership of its shared state, PostgreSQL writer lease and account transactions, keeping lock ordering and recovery behavior together. HTTP routes, database tables and command paths are unchanged; no forwarding compatibility package is left at the module root. See the [Go module layout guide](https://go.dev/doc/modules/layout).
 
 ## Startup
 

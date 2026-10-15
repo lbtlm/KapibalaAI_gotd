@@ -18,12 +18,12 @@ func TestSDKTerminalInitializationFailureStopsRetryAndKeepsCause(t *testing.T) {
 	if ctx.Err() == nil {
 		t.Fatal("SDK kept retrying a revoked authorization")
 	}
-	if e := platformError(gate.err()); e == nil || e.Code != "AUTH_KEY_DUPLICATED" || e.Status != 401 {
+	if e := platformError(gate.Err()); e == nil || e.Code != "AUTH_KEY_DUPLICATED" || e.Status != 401 {
 		t.Fatal("authorization failure lost its specific cause", e)
 	}
 	s := &Service{state: initialState()}
 	s.state.Accounts["a"] = &account{Status: "idle", ConnectionID: "cid"}
-	s.accountFailure("a", gate.err())
+	s.accountFailure("a", gate.Err())
 	if s.state.Accounts["a"].Status != "session_expired" {
 		t.Fatal("revoked account was not terminal")
 	}
@@ -35,7 +35,7 @@ func TestSDKNetworkRetryDoesNotExpireAuthorization(t *testing.T) {
 	gate := &ingestGate{cancel: cancel}
 	logger := startupLogger("diagnostic-input", gate.fail)
 	logger.Info("Restarting connection", zap.Error(context.DeadlineExceeded))
-	if ctx.Err() != nil || gate.err() != nil {
+	if ctx.Err() != nil || gate.Err() != nil {
 		t.Fatal("temporary network error invalidated authorization")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	sdkstorage "github.com/lbtlm/KapibalaAI_gotd/gateway/internal/storage"
 	"time"
 )
 
@@ -15,7 +16,7 @@ func (s *Service) save(ctx context.Context) error {
 	if e = s.store.Save(ctx, b); e == nil {
 		return nil
 	}
-	if errors.Is(e, ErrWriterLeaseLost) {
+	if errors.Is(e, sdkstorage.ErrWriterLeaseLost) {
 		s.cancel()
 		return e
 	}

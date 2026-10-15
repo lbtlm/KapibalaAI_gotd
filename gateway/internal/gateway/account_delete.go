@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	sdkstorage "github.com/lbtlm/KapibalaAI_gotd/gateway/internal/storage"
 	"net/http"
 	"strings"
 	"time"
@@ -57,7 +58,7 @@ func (p *PostgresStore) DeleteAccount(ctx context.Context, id string, snapshot [
 		rollbackErr := tx.Rollback()
 		if committing || rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
 			p.lost = true
-			err = fmt.Errorf("%w: %v", ErrWriterLeaseLost, err)
+			err = fmt.Errorf("%w: %v", sdkstorage.ErrWriterLeaseLost, err)
 			return
 		}
 		// Cancellation can roll back a transaction without losing the writer.
@@ -213,7 +214,7 @@ func (s *Service) deleteAccountHTTP(w http.ResponseWriter, r *http.Request) {
 		err = s.store.DeleteAccount(ctx, id, b)
 	}
 	if err != nil {
-		if errors.Is(err, ErrWriterLeaseLost) {
+		if errors.Is(err, sdkstorage.ErrWriterLeaseLost) {
 			s.cancel()
 		}
 		fail(w, err)
