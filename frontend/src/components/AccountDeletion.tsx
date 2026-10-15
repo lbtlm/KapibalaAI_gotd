@@ -38,7 +38,7 @@ export function DeleteAccountDialog({accounts,onDelete,onComplete,onCancel}:{acc
   <p>已选 {accounts.length} 个账号，可删除 {eligible.length} 个{eligible.length<accounts.length?`，将跳过 ${accounts.length-eligible.length} 个在线或状态不可删除的账号`:''}。后台仍会逐个检查群组、任务及操作占用。</p>
   <p>将从本系统移除账号并清理本系统保存的连接凭据。不会删除 Telegram 账号，也不会退出 Telegram 的其他设备。</p>
   <Table size="small" rowKey="id" pagination={false} scroll={{y:280}} dataSource={accounts} columns={[
-   {title:'账号',render:(_,a)=><div>{[a.phone,a.firstName,a.lastName].filter(Boolean).join(' · ')}<div>{a.id}</div></div>},
+   {title:'账号',render:(_,a)=><Tooltip title={a.id}><span>{[a.firstName,a.lastName].filter(Boolean).join(' ')||'未获取昵称'} · {a.phone||'未获取手机号（'+a.id.slice(-6)+'）'}</span></Tooltip>},
    {title:'删除结果 / 限制',render:(_,a)=>results[a.id]??accountDeletionDisabledReason(a.status)??'待确认'}
   ]}/>
   <Space style={{marginTop:16}}><Button aria-label="取消" disabled={pending} onClick={onCancel}>取消</Button><Button type="primary" danger aria-label="确认删除" loading={pending} disabled={pending||!eligible.length} onClick={()=>{void confirm()}}>确认删除 {eligible.length} 个账号</Button></Space>

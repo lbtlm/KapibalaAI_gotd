@@ -21,7 +21,7 @@ export default function MainLayout(){
    if(event.type==='account_deleted'&&typeof p.accountId==='string')void removeAccountState(cache,[p.accountId])
    if(event.type==='message')void cache.invalidateQueries({queryKey:['messages',p.groupId]})
    if(event.type==='agent_run'){void cache.invalidateQueries({queryKey:['agent-runs',p.groupId]});void cache.invalidateQueries({queryKey:['agent-run',p.runId]})}
-   if(event.type==='sequence_run')void cache.invalidateQueries({queryKey:['sequence-run',p.runId]})
+   if(event.type==='sequence_run'){void cache.invalidateQueries({queryKey:['sequence-run',p.runId]});void cache.invalidateQueries({queryKey:['sequence-history',p.groupId]})}
    void cache.invalidateQueries({queryKey:['groups']})
    if(p.groupId)void cache.invalidateQueries({queryKey:['group',p.groupId]})
   }

@@ -270,3 +270,5 @@ Red：TestIdleAccountsCannotStarveQueuedCampaignWork 在 30 个空闲在线账�
 批次历史 Red=GET 405，完整工具结果 Red=缺少 result，长协议响应 Red=2KiB 后丢失。Green：分页严格限定 group、按 createdAt/id 倒序，读取既有 sequence_runs/steps，无新表；批次明细显示消息真实投递状态及错误码。Agent detail 从既有 history 的 tool_result 回填只读 result，不复制持久化；摘要仍 200 字，工具结果仍 8KiB，rawResponse 保留传输读取上限内的原文。符合 2.2/A5 的 end_turn/finish 不发送、四工具协议、审计先行和执行预算。
 
 定向隔离 PostgreSQL 回归通过（15.938s），包含上述4个新行为、12步边界、重复tool-id、外部消息筛选、锁定管理员、剧本快照和暂停；race（22.695s）覆盖新行为、持久群会话、取消消息不复发、协议错误与工具历史。provider/domain 常规测试通过。TestLiveAmbiguousMessageRequestsAuditedReply 调用真实 DeepSeek（5.10s）：合成111输入→get_recent_messages→send_message澄清→独立审计pass；停在工具请求，不调用Gateway/Telegram。没有把模型summary变成群消息，未绕过审核；旧含糊消息不会被重放。
+
+R29 现场只读结果：后端部署后发现Gateway已于21:24正常退出（本轮部署前），恢复原容器后由既有生命周期管理恢复连接。用户先前启动的同一批次恢复发送，第2/3/4/5步均收到sent回执；22/30/45秒配置间隔对应实际约24/32/48秒，包含发送耗时。21:34现场新外部消息触发的真实AI运行完成，send_message对应消息为sent。未注入群消息、未新开批次、未手动逐账号登录。这些证据覆盖现场恢复与一次真实AI回复，不等同全部20步或B2退群验收。

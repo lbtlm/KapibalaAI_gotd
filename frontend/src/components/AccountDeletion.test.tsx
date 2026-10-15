@@ -34,11 +34,11 @@ function dialog(accounts:Account[],remove:(id:string)=>Promise<unknown>,complete
  return render(<App><DeleteAccountDialog accounts={accounts} onDelete={remove} onComplete={complete} onCancel={cancel}/></App>)
 }
 
-test('取消不删除，确认列出手机号、昵称及ID',()=>{
+test('取消不删除，确认显示姓名手机号且悬浮可见ID',async()=>{
  const remove=vi.fn(),cancel=vi.fn()
  dialog([account('selection')],remove,undefined,cancel)
- expect(screen.getByText('12025550123 · Test')).toBeInTheDocument()
- expect(screen.getByText('selection')).toBeInTheDocument()
+ expect(screen.getByText('Test · 12025550123')).toBeInTheDocument()
+ await userEvent.hover(screen.getByText('Test · 12025550123'));expect(await screen.findByRole('tooltip')).toHaveTextContent('selection')
  expect(screen.getByText(/不会删除 Telegram 账号，也不会退出 Telegram 的其他设备/)).toBeInTheDocument()
  fireEvent.click(screen.getByRole('button',{name:'取消'}))
  expect(cancel).toHaveBeenCalledTimes(1)

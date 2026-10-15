@@ -7,9 +7,9 @@ import {AccountDeleteButton} from './AccountDeletion'
 import { formatTime } from '../hooks'
 export type AccountAction = 'check' | 'disconnected' | 'idle'
 export const accountName = (a: Account) => [a.firstName,a.lastName].filter(Boolean).join(' ') || '未获取昵称'
-export const accountLabel = (a: Account) => accountName(a)+' · '+(a.phone||a.id)
+export const accountLabel = (a: Account) => accountName(a)+' · '+(a.phone||'未获取手机号（'+a.id.slice(-6)+'）')
 export const buildAccountTableColumns = ({ writable, isBusy, groups, onAction, onDetail, onDelete }: { writable: boolean; isBusy:(id:string)=>boolean; groups: AccountGroup[]; onAction: (account: Account, action: AccountAction) => void; onDetail: (account: Account) => void; onDelete:(account:Account)=>void }): ColumnsType<Account> => [
-  { title: '手机号 / 账号', key: 'phone', width: 210, render: (_, a) => <div><Typography.Text className={styles.mono} copyable={a.phone?{text:a.phone}:false}>{a.phone || '未获取手机号'}</Typography.Text><div className={styles.meta+' '+styles.accountIdentity}>{a.id}{a.phone&&!a.phoneVerified?' · 待检测核验':''}</div></div> },
+  { title: '手机号 / 账号', key: 'phone', width: 210, render: (_, a) => <div><Typography.Text className={styles.mono} copyable={a.phone?{text:a.phone}:false}>{a.phone || '未获取手机号'}</Typography.Text><div title={a.id} className={styles.meta+' '+styles.accountIdentity}>账号 {a.id.slice(-8)}{a.phone&&!a.phoneVerified?' · 待检测核验':''}</div></div> },
   { title: '昵称 / 用户名', key: 'name', width: 180, render: (_,a) => <div>{accountName(a)}<div className={styles.meta}>{a.username?'@'+a.username:a.verificationSource==='telegram'?'未设置用户名':'未获取用户名'}</div></div> },
   { title: 'Telegram ID', dataIndex: 'platformUserId', width: 150, render: (id: string | null) => <Typography.Text className={styles.mono}>{id ?? '未获取'}</Typography.Text> },
   { title: '分组', key: 'group', width: 130, render: (_,a) => groups.find(g=>g.id===a.groupId)?.name ?? '未分组' },

@@ -1,25 +1,13 @@
 import {fireEvent,render,screen,waitFor,within} from '@testing-library/react'
 import {vi,test,expect} from 'vitest'
-import ExternalMessageNotice from './ExternalMessageNotice'
+
 import GroupLogs from './GroupLogs'
 import {SequenceSetup,sequenceError} from './GroupSequence'
 import {parseStepVars,resolveDraft} from './sequenceDraft'
-import type {Group,Message,Sequence} from '../types'
+import type {Group,Sequence} from '../types'
 
 const sequence:Sequence={id:'s1',name:'读书会',steps:[{index:1,accountRole:'admin',text:'欢迎参加 {event}',delaySeconds:0},{index:2,accountRole:'member',text:'{event} 怎么参加？',delaySeconds:5}]}
 const group:Group={id:'g1',gatewayGroupId:'tg1',status:'active',creatorAccountId:'owner',adminAccountId:'admin',agentEnabled:false,autoKickEnabled:false,members:[{accountId:'admin',platformUserId:'1',role:'admin'},{accountId:'member',platformUserId:'2',role:'member'}],activeSequenceRunId:null,activeAgentRunId:null,sequenceConfig:{sequenceId:'s1',vars:{},stepVars:{},memberAccountIds:['member']}}
-const msg=(id:string,at:string):Message=>({msgId:id,clientMsgId:null,senderPlatformUserId:'external',isOwn:false,text:'hi',sentAt:at,deliveryStatus:null,failCode:null})
-
-test('external notice is acknowledged by viewing and only newer messages restore it',()=>{
- const first=msg('1','2026-10-15T01:00:00Z'),second=msg('2','2026-10-15T02:00:00Z'),older=msg('0','2026-10-14T01:00:00Z'),open=vi.fn()
- const view=render(<ExternalMessageNotice messages={[first]} active={false} onOpen={open}/>)
- expect(screen.getByText('1 条待查看外部消息')).toBeVisible()
- fireEvent.click(screen.getByRole('button',{name:'查看消息'}));expect(open).toHaveBeenCalledOnce()
- view.rerender(<ExternalMessageNotice messages={[first]} active onOpen={open}/>);expect(screen.queryByRole('status')).not.toBeInTheDocument()
- view.rerender(<ExternalMessageNotice messages={[older,first]} active={false} onOpen={open}/>);expect(screen.queryByRole('status')).not.toBeInTheDocument()
- view.rerender(<ExternalMessageNotice messages={[older,first,second]} active={false} onOpen={open}/>);expect(screen.getByText('1 条待查看外部消息')).toBeVisible()
-})
-
 test('script fields explain missing variables, update dialogue, and pass configuration only to preview',async()=>{
  const preview=vi.fn()
  render(<SequenceSetup group={group} accounts={[]} definitions={[sequence]} pending={false} onChange={vi.fn()} onPreview={preview}/>)

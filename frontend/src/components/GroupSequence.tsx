@@ -6,7 +6,6 @@ import {api,ApiError} from '../api/client'
 import type {Account,Group,Sequence,SequenceInput,PreviewStep} from '../types'
 import {accountLabel} from './AccountTableColumns'
 import {ErrorNotice} from './Feedback'
-import SequenceProgress from './SequenceProgress'
 import SequencePreview from './SequencePreview'
 import {parseStepVars,resolveDraft,variableKeys} from './sequenceDraft'
 import styles from '../layout/MainLayout.module.scss'
@@ -48,16 +47,15 @@ export function SequenceSetup({group,accounts,definitions,pending,onPreview,onCh
  </div><div className={styles.sequencePreview}><h2>2. 查看对话效果</h2>{draft?<SequencePreview value={draft.value} editableVariables={false} actors={actors}/>:<p className={styles.meta}>先选择剧本，这里将展示每一步的内容、角色、账号和预计时间。</p>}</div></div>
 }
 
-export default function GroupSequence({group,accounts,writable}:{group:Group;accounts:Account[];writable:boolean}){
+export default function GroupSequence({group,accounts,writable,onStarted}:{group:Group;accounts:Account[];writable:boolean;onStarted:(id:string)=>void}){
  const cache=useQueryClient(),revision=useRef(0),[notice,holder]=message.useMessage()
- const [preview,setPreview]=useState<{input:SequenceInput;steps:PreviewStep[]}|null>(null),[lastRun,setLastRun]=useState('')
+ const [preview,setPreview]=useState<{input:SequenceInput;steps:PreviewStep[]}|null>(null)
  const definitions=useQuery({queryKey:['sequences'],queryFn:()=>api.request<Sequence[]>('/api/sequences')})
  const inspect=useMutation({mutationFn:({input}:{input:SequenceInput;revision:number})=>api.request<{steps:PreviewStep[]}>('/api/groups/'+group.id+'/sequence-runs/preview','POST',input),onSuccess:(r,v)=>{if(v.revision===revision.current)setPreview({input:v.input,steps:r.steps})},onError:(e,v)=>{if(v.revision===revision.current)notice.error(sequenceError(e),5)}})
- const start=useMutation({mutationFn:(input:SequenceInput)=>api.request<{runId:string}>('/api/groups/'+group.id+'/sequence-runs','POST',input),onSuccess:r=>{setLastRun(r.runId);setPreview(null);cache.invalidateQueries({queryKey:['group',group.id]})},onError:e=>notice.error(sequenceError(e),5)})
+ const start=useMutation({mutationFn:(input:SequenceInput)=>api.request<{runId:string}>('/api/groups/'+group.id+'/sequence-runs','POST',input),onSuccess:r=>{setPreview(null);cache.invalidateQueries({queryKey:['group',group.id]});cache.invalidateQueries({queryKey:['sequence-history',group.id]});onStarted(r.runId)},onError:e=>notice.error(sequenceError(e),5)})
  const label=(id:string|null|undefined)=>{const a=accounts.find(a=>a.id===id);return a?accountLabel(a):id??'未分配'}
  return <section>{holder}<div className={styles.panelTitle}><h2>本群剧本</h2><Link to="/sequences">创建 / 编辑剧本库</Link></div><ErrorNotice error={definitions.error}/>
   {writable?<SequenceSetup group={group} accounts={accounts} definitions={definitions.data??[]} pending={inspect.isPending} onChange={()=>{revision.current++;setPreview(null)}} onPreview={input=>{setPreview(null);inspect.mutate({input,revision:++revision.current})}}/>:<p>请管理员配置本群剧本与发送账号。</p>}
-  {(group.activeSequenceRunId||lastRun)&&<SequenceProgress id={group.activeSequenceRunId||lastRun}/>}
   <Modal width={1000} title="3. 确认最终发送内容" open={!!preview} onCancel={()=>setPreview(null)} footer={<Button type="primary" disabled={group.status!=='active'||group.marketingPaused||!!group.activeSequenceRunId} loading={start.isPending} onClick={()=>preview&&start.mutate(preview.input)}>确认启动发送</Button>}><p>以下是后台校验后的实际账号与消息。确认后将按顺序向本群发送。</p><Table rowKey="index" size="small" pagination={false} scroll={{x:650}} dataSource={preview?.steps} columns={[{title:'步骤',dataIndex:'index',width:60},{title:'角色',dataIndex:'accountRole',width:100,render:v=>v==='admin'?'管理员':'普通成员'},{title:'实际账号',dataIndex:'accountId',render:label},{title:'等待',dataIndex:'delaySeconds',width:80,render:v=>v+' 秒'},{title:'最终消息',dataIndex:'text',render:v=><span style={{whiteSpace:'pre-wrap'}}>{v}</span>}]}/></Modal>
  </section>
 }

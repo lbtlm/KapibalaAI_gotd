@@ -4,7 +4,7 @@ import {Alert,Button,Descriptions,Input,Modal,Select,Space,Table,Tabs,Tag,Typogr
 import {api} from '../api/client'
 import {invalidateAccountState} from '../api/account-cache'
 import type {Account,AccountGroup,AccountLogPage,JoinedGroups} from '../types'
-import {accountName,type AccountAction} from './AccountTableColumns'
+import {accountName,accountLabel,type AccountAction} from './AccountTableColumns'
 import {LoadState} from './Feedback'
 import {AccountErrorNotice as ErrorNotice,accountErrorText,useAccountMessage} from './AccountFeedback'
 import StatusTag from './StatusTag'
@@ -23,7 +23,7 @@ export default function AccountDetails({id,groups,writable,busy,onAction,onDelet
  const a=account.data,online=a?.status==='online',terminal=a&&['suspended','session_expired'].includes(a.status)
  const logItems=logs.data?.pages.flatMap(p=>p.items)??[]
  const groupsEmpty=joined.data?.lastSyncedAt?'最近一次同步未发现已加入的群组。':joined.isError?'所在群加载失败，请重试。':'尚未同步所在群。'
- return <Modal title={'账号详情 · '+id} open width={1080} footer={null} onCancel={onClose} destroyOnHidden styles={{body:{maxHeight:'72dvh',overflowY:'auto'}}}>
+ return <Modal title={'账号详情 · '+(a?accountLabel(a):'正在加载')} open width={1080} footer={null} onCancel={onClose} destroyOnHidden styles={{body:{maxHeight:'72dvh',overflowY:'auto'}}}>
   <ErrorNotice error={account.error}/>
   <LoadState loading={account.isLoading}/>
   {account.isError&&<Button onClick={()=>account.refetch()}>重试加载详情</Button>}
