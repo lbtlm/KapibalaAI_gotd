@@ -126,3 +126,15 @@ AntD NODE_ENV=test 的 useId 固定为 test-id，使多个 Select 与 Modal aria
 布局浏览器：`E2E_BASE_URL=http://127.0.0.1:15173 E2E_BROWSER_CHANNEL=msedge pnpm exec playwright test e2e/accounts-layout.spec.ts`，layout-green.log 1 passed / 5.4s。61条合成 HTTP 展示数据、1366/1920/2560×900，验证 account content 右边界、无页面横溢、内部滚动、分页留在视口内、切页和搜索回页1；截图 accounts-{1366,1920,2560}.png，已看图1366与2560。首次展示路由通配符误拦 Vite 的 src/api/client.ts 模块，范围改为 URL.pathname 以 /api/ 开头后绿；属于测试夹具，不是产品红。后续加分组/状态组合筛选断言，待组合浏览器一起验证。
 
 `pnpm typecheck`（含新增 Node22 SQLite E2E）通过，typecheck-with-e2e.log；最终生产 `pnpm build` 通过，3258 modules，7.64s，build-stable.log；旧 AntD >500kB chunk 提示保留，不扩展优化范围。实际 Telegram/LLM、远端CI与主控最终验收不由这些本地结果证明。
+
+### 最终验证与审查后收敛
+
+最终受影响组合 `pnpm exec vitest run src/pages/Accounts.test.tsx src/api/realtime.test.ts --reporter verbose`，2 files / 10 passed，35.97s；分组CRUD 7274ms。证据 affected-stable.log。主控 Sentry 首轮未发现前端产品阻塞；随后唯一新增生产改动是按主控指示为 upgrade_disconnect 日志动作加“升级后断开连接”标签/筛选。`pnpm build`（含 tsc）再次通过，3258 modules、6.22s，build-review-mapping.log；未为静态映射增加镜像单测，未重复已通过unit。
+
+真实浏览器新账号用例最终 `pnpm exec playwright test e2e/accounts.spec.ts --grep '配对导入' --reporter=list --output=../.local/inspection-20261015/iris/account-capture-results`，1 passed / 16.0s（用例11.2s），account-capture.log。真实 PG、backend、持久 fake gateway、scripted Agent；Node22内置SQLite临时生成两个独立合成授权与一份无效Session，测试finally删除文件。实际浏览器multipart含自动boundary，2成功/1 INVALID_SESSION逐结果；完整手机号/分组→明确连接并检测→模拟来源且未核验手机号→只读详情和导入/连接/检测日志→完整creator群快照→重复导入明确错误→批移未分组→删组仍保留账号，全部通过；读取详情/日志未产生连接或同步POST，群同步前后托管群清单及AI开关一致。
+
+新layout 1 passed / 1.7s，新增viewer 1 passed / 1.5s，复用 accounts-focused.log 对这两项的通过证据。layout包含三桌面宽度、内滚动、分页、搜索回页1、分组30条与叠加在线10条，统计仍61。最初集中测试停于隐藏AntD虚拟option，改点可见option-content后绿；账号流程后续定位假设分别是zhCN关闭按钮并非英文Close、has内层错误包含modal根。均经trace/页面快照确认后只修测试定位，未改变产品/timeout；已知等待主动停止。最终四截图使用 animations:'disabled'，避免过渡帧误作视觉证据。
+
+既有真实栈 `pnpm exec playwright test e2e/platform.spec.ts --reporter=list --output=../.local/inspection-20261015/iris/platform-results`，3 passed / 18.4s（C3/viewer/B4），platform-stable.log。B4从恢复184.971ms、认证后100.555ms，三条各一行，seq16/17/18，第二重连cursor18保持唯一；没有重跑已通过platform。
+
+本轮服务端口18080/18081/18082，Vite15173，DSN由忽略的test-environment.json提供，未使用5173 demo。截图已逐图看过：.local/inspection-20261015/iris/actual-upload.png、actual-details.png、actual-groups.png、actual-logs.png；都是隔离真实栈加合成数据，不是Telegram真实账号/真实LLM证据。旧fake-stack session72771保留供主控审查修复后的定向健康/限流/升级联调，主控确认后清理；新二进制修复的联调尚不由上述旧服务结果证明。源码和文档完成后冻结，SUBMITTED待主控最终验收。

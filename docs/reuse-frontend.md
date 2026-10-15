@@ -37,3 +37,5 @@ B4 复用现有实际栈 Playwright、HTTP 准备和 fake 网关注入；将 C3 
 必要新增 AccountDetails（独立只读查询/群缓存/分页日志）、ImportAccounts（同名配对预览和逐项返回）、AccountGroupManager（单分组 CRUD）分别对应冻结契约，均组合现有 AntD Modal/Tabs/Form/Table/Select 原语。AccountFeedback 在上述多个入口复用账号错误的中文主说明，安全 code 仍可查证；不另造通用表单、上传系统或连接池。配对只读文件名，不在前端解析/打印授权内容。ApiClient 未改动，沿用 Axios 的浏览器 FormData 自动 boundary 行为。
 
 实际栈测试的 Telethon SQLite 表结构参考本批 Niko 的 gateway/account_management_test.go（同一开发快照），由 Node 22 内置 SQLite 在临时目录生成完全合成文件，授权字节不是实际账号，结束删除；不将 Session 文件加入 Git 或证据包。仅新增覆盖缺失公共行为的 UI/HTTP/浏览器测试，无额外依赖。旧账号操作/表头实现已原位替换，没有保留重复入口。
+
+F16验证收尾：新的Node22 SQLite实际上传用例、合成展示布局用例与既有platform真实栈证据分别标明；测试的AntD虚拟选项、zhCN关闭与相对has locator按实际DOM原位修正，没有保留备用测试路径或改生产交互来迁就测试。审查后只扩既有日志动作映射upgrade_disconnect，没有新模块或依赖。

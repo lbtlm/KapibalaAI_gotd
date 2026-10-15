@@ -9,7 +9,7 @@ import {AccountErrorNotice as ErrorNotice,accountErrorText} from './AccountFeedb
 import StatusTag from './StatusTag'
 import {formatTime} from '../hooks'
 import styles from '../layout/MainLayout.module.scss'
-const actions:Record<string,string>={import:'导入账号',check:'检测账号',connect:'连接账号',disconnect:'标记离线',transition:'变更状态',sync_groups:'同步所在群',group_move:'移动分组',group_rename:'重命名分组',group_delete:'删除分组',connection_ended:'连接已断开'}
+const actions:Record<string,string>={import:'导入账号',check:'检测账号',connect:'连接账号',disconnect:'标记离线',transition:'变更状态',sync_groups:'同步所在群',group_move:'移动分组',group_rename:'重命名分组',group_delete:'删除分组',connection_ended:'连接已断开',upgrade_disconnect:'升级后断开连接'}
 const roles={creator:'群主',admin:'管理员',member:'成员',unknown:'角色未知'}
 export default function AccountDetails({id,groups,writable,busy,error,onAction,onClose}:{id:string;groups:AccountGroup[];writable:boolean;busy:boolean;error:unknown;onAction:(a:Account,to:AccountAction)=>void;onClose:()=>void}){
  const cache=useQueryClient(),[tab,setTab]=useState('basic'),[actionFilter,setActionFilter]=useState<string>(),[result,setResult]=useState<string>()

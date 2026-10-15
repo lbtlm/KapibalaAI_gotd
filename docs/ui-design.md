@@ -35,3 +35,5 @@ Reading this as: 日常Telegram多账号运营员的消息工作台，以紧凑�
 上传 Modal 保留原生多选文件输入，AntD Form/Select/预览表格承接分组和配对结果；缺失或歧义必须先修正，服务端逐账号失败保留可读中文与安全 code。分组删除明确“账号移至未分组，不删除账号”；批移失败保留选择/目标和弹窗。加载、空、失败、重试均就近呈现。
 
 1366/1920/2560×900 桌面以 61 条合成 HTTP 展示夹具验证全宽、视口内分页、内部滚动与切页；截图 .local/inspection-20261015/iris/accounts-{1366,1920,2560}.png，人工看图确认 1366 和 2560 无页面横溢或空白右区。该夹具不证明实际账号导入或 Telegram 连通性；真实栈证据单列于 TDD 记录。
+
+F16审查后仅新增 upgrade_disconnect → 升级后断开连接 的既有动作映射。实际栈四类截图位于 .local/inspection-20261015/iris/actual-upload.png、actual-details.png、actual-groups.png、actual-logs.png；已逐图检查。截图禁用过渡动画，仅用于清晰捕获，不改变产品动画。该栈为真实服务+完全合成数据，模拟检测始终明确标识；不作为真实Telegram核验。

@@ -1,6 +1,6 @@
 # Account management inspection — 2026-10-15
 
-Status: approved implementation, revision 3. Tracking: GitHub issue #4, PR #5 into dev, multiple focused commits. Branch: fix/account-inspection-20261015; baseline: dc0db77. Controller owns integration, Git and acceptance.
+Status: approved implementation, revision 4. Tracking: GitHub issue #4, PR #5 into dev, multiple focused commits. Branch: fix/account-inspection-20261015; baseline: dc0db77. Controller owns integration, Git and acceptance.
 
 ## Approved behavior
 
@@ -17,6 +17,8 @@ Status: approved implementation, revision 3. Tracking: GitHub issue #4, PR #5 in
 
 Preserve the examination A1 states/transitions, CAS, atomic terminal consequences and persisted frontend events. Ordinary gotd Run termination currently sets only gateway offline. Add a durable, stale-safe path that makes the corresponding backend account disconnected (only from an eligible live state), without reviving manual offline/terminal accounts or allowing an old connection result to overwrite a newer one. Preserve the existing client shutdown, request cancellation and writer-fencing boundaries. No unsolicited automatic connection on detail/group-sync reads.
 
+Upgrade legacy online/rate-limited accounts without an incarnation to disconnected with an atomic pending disconnect intent. Gateway startup persists those legacy connections offline instead of automatically resuming them. The next explicit user connection obtains a fresh ID. Preserve groups, business records and terminal accounts; connections with an existing ID retain their normal recovery semantics. Check and group-sync RATE_LIMITED failures apply the existing A2 account deadline/backoff and retain retry metadata, failed operation logs and the previous successful group snapshot.
+
 ## Ownership and dispatch
 
 - Niko: gateway/**, docs/reuse-gateway.md, docs/tdd-gateway.md. Complex; requested GPT-6.1 Sol / Ultra, explicit worker binding.
@@ -32,7 +34,7 @@ Use public-boundary TDD with concise red/green records in component documents. C
 
 ## Shared API
 
-Revision 3: the following names are frozen for this batch. Preserve existing account/group list envelopes and A1 endpoints. All identifiers are strings; timestamps ISO8601 UTC or null. User-facing write operations require admin. The verification source addition below prevents simulated checks from claiming real Telegram verification.
+Revision 4: the following names are frozen for this batch. Preserve existing account/group list envelopes and A1 endpoints. All identifiers are strings; timestamps ISO8601 UTC or null. User-facing write operations require admin. The verification source addition below prevents simulated checks from claiming real Telegram verification. Duplicate authorization detection includes both dynamically imported and manifest-backed accounts, using persisted authorization first when available; no live connection is required to check identity.
 
 ### Gateway (internal, existing trusted network boundary)
 
