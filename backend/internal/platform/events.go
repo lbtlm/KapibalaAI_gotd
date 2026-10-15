@@ -182,7 +182,7 @@ func (a *App) processEvent(ctx context.Context, id int64) error {
 			e = unreachable(ctx, tx, groupID)
 		} else if code == "ACCOUNT_SUSPENDED" {
 			var from string
-			if e = tx.QueryRow(ctx, `SELECT status FROM accounts WHERE id=$1 FOR UPDATE`, account).Scan(&from); e == nil {
+			if e = tx.QueryRow(ctx, `SELECT status FROM accounts WHERE id=$1 FOR UPDATE`, account).Scan(&from); e == nil && accountTerminalError(from) == nil {
 				e = transition(ctx, tx, account, from, "suspended", nil)
 			}
 		}

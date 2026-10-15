@@ -111,6 +111,81 @@ func TestPersistedTerminalSignalsKeepFirstCauseAndDoNotBlockFollowingEvents(t *t
 	}
 }
 
+func TestLateMessageFailurePreservesTerminalAndInboxProgress(t *testing.T) {
+	for _, first := range []string{"session_expired", "suspended"} {
+		t.Run(first, func(t *testing.T) {
+			a, s, cfg := fixtureConfig(t)
+			group := insertBusinessGroup(t, cfg)
+			// Persisted business inputs exercise backend message reduction only;
+			// they do not provide a Session or a successful Telegram RPC.
+			businessSQL(t, cfg, `INSERT INTO messages(group_id,client_msg_id,account_id,sender_platform_user_id,is_own,text,delivery_status) VALUES($1,'late-failure-input','account-2','database-input-b',true,'accepted business input','accepted'),($1,'terminal-queued-input','account-2','database-input-b',true,'queued business input','queued')`, group)
+			token, _ := login(t, s, "admin")
+			st, b, _ := call(t, s, "POST", "/api/accounts/account-2/transition", token, `{"expectedFrom":"online","to":"`+first+`"}`)
+			if st != 200 {
+				t.Fatal(st, b)
+			}
+			businessSQL(t, cfg, `INSERT INTO gateway_inbox(event_id,type,data,received_at) VALUES(1,'message_failed','{"clientMsgId":"late-failure-input","code":"ACCOUNT_SUSPENDED"}',now()-interval '2 seconds'),(2,'account_status','{"accountId":"account-3","status":"session_expired"}',now()-interval '2 seconds')`)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if e := a.Start(ctx); e != nil {
+				t.Fatal(e)
+			}
+			deadline := time.Now().Add(3 * time.Second)
+			for accountStatus(t, s, token, "account-3") != "session_expired" && time.Now().Before(deadline) {
+				time.Sleep(30 * time.Millisecond)
+			}
+			if got := accountStatus(t, s, token, "account-3"); got != "session_expired" {
+				t.Fatalf("late message failure blocked the following event: status=%s", got)
+			}
+			if got := accountStatus(t, s, token, "account-2"); got != first {
+				t.Fatalf("late message failure replaced committed terminal state: %s", got)
+			}
+			st, b, _ = call(t, s, "GET", "/api/groups/"+group, token, "")
+			if st != 200 || len(b["members"].([]any)) != 1 || b["members"].([]any)[0].(map[string]any)["accountId"] != "account-1" {
+				t.Fatalf("terminal membership consequence changed: %d %v", st, b)
+			}
+			st, b, _ = call(t, s, "GET", "/api/groups/"+group+"/messages", token, "")
+			if st != 200 || len(b["items"].([]any)) != 2 {
+				t.Fatal(st, b)
+			}
+			for _, raw := range b["items"].([]any) {
+				item := raw.(map[string]any)
+				status, code := "failed", "ACCOUNT_SUSPENDED"
+				if item["clientMsgId"] == "terminal-queued-input" {
+					status, code = "cancelled", "ACCOUNT_TERMINAL"
+				}
+				if item["deliveryStatus"] != status || item["failCode"] != code {
+					t.Fatalf("message result or committed cancellation changed: %v", item)
+				}
+			}
+			c, _, e := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(s.URL, "http")+"/ws", nil)
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer c.Close()
+			c.SetReadDeadline(time.Now().Add(3 * time.Second))
+			c.WriteJSON(map[string]any{"type": "auth", "accessToken": token, "sinceSeq": 0})
+			var frame map[string]any
+			if e = c.ReadJSON(&frame); e != nil || frame["success"] != true {
+				t.Fatal("WS authentication", e, frame)
+			}
+			for i := 1; i <= 4; i++ {
+				if e = c.ReadJSON(&frame); e != nil {
+					t.Fatal(e)
+				}
+				id, expected := "account-2", first
+				if i > 2 {
+					id, expected = "account-3", "session_expired"
+				}
+				payload := frame["payload"].(map[string]any)
+				if frame["seq"] != float64(i) || payload["accountId"] != id || (payload["status"] != expected && payload["to"] != expected) {
+					t.Fatalf("WS replay diverged from committed terminal state: %v", frame)
+				}
+			}
+		})
+	}
+}
+
 func TestTerminalDiagnosisMigrationRepairsOnlyOverwrittenFailures(t *testing.T) {
 	a, _, cfg := fixtureConfig(t)
 	a.Close()
