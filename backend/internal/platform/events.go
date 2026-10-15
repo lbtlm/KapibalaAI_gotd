@@ -196,9 +196,28 @@ func (a *App) processEvent(ctx context.Context, id int64) error {
 		_, e = tx.Exec(ctx, `DELETE FROM members WHERE group_id=(SELECT id FROM groups WHERE gateway_group_id=$1) AND platform_user_id=$2`, str("groupId"), str("platformUserId"))
 	case "account_status":
 		var from string
-		e = tx.QueryRow(ctx, `SELECT status FROM accounts WHERE id=$1 FOR UPDATE`, str("accountId")).Scan(&from)
+		var incarnation *string
+		e = tx.QueryRow(ctx, `SELECT status,connection_id FROM accounts WHERE id=$1 FOR UPDATE`, str("accountId")).Scan(&from, &incarnation)
+		if e == pgx.ErrNoRows {
+			e = nil
+			break
+		}
 		if e == nil {
-			e = transition(ctx, tx, str("accountId"), from, str("status"), nil)
+			if str("status") == "offline" {
+				if incarnation == nil || str("connectionId") == "" || *incarnation != str("connectionId") {
+					break
+				}
+				if from == "online" || from == "rate_limited" {
+					e = transition(ctx, tx, str("accountId"), from, "disconnected", nil)
+					if e == nil {
+						e = writeAccountLog(ctx, tx, str("accountId"), "gateway", "connection_ended", nil)
+					}
+				} else if from == "idle" || from == "disconnected" {
+					_, e = tx.Exec(ctx, `UPDATE accounts SET connection_id=NULL WHERE id=$1 AND connection_id=$2`, str("accountId"), str("connectionId"))
+				}
+			} else {
+				e = transition(ctx, tx, str("accountId"), from, str("status"), nil)
+			}
 		}
 	}
 	if e != nil {

@@ -8,10 +8,42 @@ import (
 )
 
 type Account struct {
-	ID               string     `json:"id"`
-	Status           string     `json:"status"`
-	PlatformUserID   *string    `json:"platformUserId"`
-	RateLimitedUntil *time.Time `json:"rateLimitedUntil"`
+	ID                 string     `json:"id"`
+	Status             string     `json:"status"`
+	PlatformUserID     *string    `json:"platformUserId"`
+	RateLimitedUntil   *time.Time `json:"rateLimitedUntil"`
+	Phone              *string    `json:"phone"`
+	PhoneVerified      bool       `json:"phoneVerified"`
+	VerificationSource *string    `json:"verificationSource"`
+	Username           *string    `json:"username"`
+	FirstName          *string    `json:"firstName"`
+	LastName           *string    `json:"lastName"`
+	Premium            *bool      `json:"premium"`
+	GroupID            *string    `json:"groupId"`
+	LastCheckedAt      *time.Time `json:"lastCheckedAt"`
+	LastCheckResult    *string    `json:"lastCheckResult"`
+	LastCheckError     *string    `json:"lastCheckError"`
+	CreatedAt          time.Time  `json:"createdAt"`
+}
+
+const accountColumns = `id,status,platform_user_id,rate_limited_until,phone,phone_verified,username,first_name,last_name,premium,group_id,last_checked_at,last_check_result,last_check_error,created_at,verification_source`
+
+func scanAccount(row pgx.Row) (Account, error) {
+	var v Account
+	e := row.Scan(&v.ID, &v.Status, &v.PlatformUserID, &v.RateLimitedUntil, &v.Phone, &v.PhoneVerified, &v.Username, &v.FirstName, &v.LastName, &v.Premium, &v.GroupID, &v.LastCheckedAt, &v.LastCheckResult, &v.LastCheckError, &v.CreatedAt, &v.VerificationSource)
+	return v, e
+}
+
+func (a *App) accountGet(w http.ResponseWriter, r *http.Request) error {
+	v, e := scanAccount(a.pool.QueryRow(r.Context(), `SELECT `+accountColumns+` FROM accounts WHERE id=$1`, r.PathValue("id")))
+	if e == pgx.ErrNoRows {
+		return fail(404, "ACCOUNT_NOT_FOUND")
+	}
+	if e != nil {
+		return e
+	}
+	respond(w, 200, v)
+	return nil
 }
 
 var edges = map[string]map[string]bool{
@@ -19,16 +51,16 @@ var edges = map[string]map[string]bool{
 }
 
 func (a *App) accounts(w http.ResponseWriter, r *http.Request) error {
-	rows, e := a.pool.Query(r.Context(), `SELECT id,status,platform_user_id,rate_limited_until FROM accounts ORDER BY id`)
+	rows, e := a.pool.Query(r.Context(), `SELECT `+accountColumns+` FROM accounts ORDER BY id`)
 	if e != nil {
 		return e
 	}
 	defer rows.Close()
 	items := []Account{}
 	for rows.Next() {
-		var v Account
-		if e = rows.Scan(&v.ID, &v.Status, &v.PlatformUserID, &v.RateLimitedUntil); e != nil {
-			return e
+		v, err := scanAccount(rows)
+		if err != nil {
+			return err
 		}
 		items = append(items, v)
 	}
@@ -51,7 +83,7 @@ func transition(ctx context.Context, tx pgx.Tx, id, from, to string, until *time
 	if !edges[from][to] {
 		return fail(409, "ILLEGAL_TRANSITION")
 	}
-	if _, e := tx.Exec(ctx, `UPDATE accounts SET status=$2,rate_limited_until=$3 WHERE id=$1`, id, to, until); e != nil {
+	if _, e := tx.Exec(ctx, `UPDATE accounts SET status=$2,rate_limited_until=$3,connection_id=CASE WHEN $2 IN ('idle','disconnected','suspended','session_expired') THEN NULL ELSE connection_id END WHERE id=$1`, id, to, until); e != nil {
 		return e
 	}
 	if to == "suspended" || to == "session_expired" {
@@ -70,13 +102,22 @@ func transition(ctx context.Context, tx pgx.Tx, id, from, to string, until *time
 	}
 	return emit(ctx, tx, "account_status_changed", map[string]any{"accountId": id, "from": from, "to": to})
 }
-func (a *App) manualTransition(w http.ResponseWriter, r *http.Request) error {
+func (a *App) manualTransition(w http.ResponseWriter, r *http.Request) (err error) {
+	action := "transition"
+	defer func() {
+		if err != nil {
+			a.recordAccountAttempt(r.Context(), r.PathValue("id"), action, err)
+		}
+	}()
 	var b struct {
 		To           string `json:"to"`
 		ExpectedFrom string `json:"expectedFrom"`
 	}
 	if e := decode(r, &b); e != nil {
 		return e
+	}
+	if b.To == "idle" || b.To == "disconnected" {
+		action = "disconnect"
 	}
 	if b.To == "" || b.ExpectedFrom == "" {
 		return fail(400, "VALIDATION_ERROR")
@@ -110,6 +151,9 @@ func (a *App) manualTransition(w http.ResponseWriter, r *http.Request) error {
 			return e
 		}
 	}
+	if e = writeAccountLog(ctx, tx, r.PathValue("id"), actor(ctx), action, nil); e != nil {
+		return e
+	}
 	if e = tx.Commit(ctx); e != nil {
 		return e
 	}
@@ -119,16 +163,31 @@ func (a *App) manualTransition(w http.ResponseWriter, r *http.Request) error {
 	respond(w, 200, map[string]any{"status": b.To})
 	return nil
 }
-func (a *App) connect(w http.ResponseWriter, r *http.Request) error {
-	ctx := r.Context()
+func (a *App) connect(w http.ResponseWriter, r *http.Request) (err error) {
+	defer func() {
+		if err != nil {
+			a.recordAccountAttempt(r.Context(), r.PathValue("id"), "connect", err)
+		}
+	}()
+	if err = a.connectAccount(r.Context(), r.PathValue("id")); err != nil {
+		return err
+	}
+	v, e := scanAccount(a.pool.QueryRow(r.Context(), `SELECT `+accountColumns+` FROM accounts WHERE id=$1`, r.PathValue("id")))
+	if e != nil {
+		return e
+	}
+	respond(w, 200, map[string]any{"status": v.Status, "platformUserId": v.PlatformUserID})
+	return nil
+}
+func (a *App) connectAccount(ctx context.Context, id string) error {
 	tx, e := a.pool.Begin(ctx)
 	if e != nil {
 		return e
 	}
 	defer tx.Rollback(ctx)
-	id := r.PathValue("id")
 	var status string
-	e = tx.QueryRow(ctx, `SELECT status FROM accounts WHERE id=$1 FOR UPDATE`, id).Scan(&status)
+	var incarnation *string
+	e = tx.QueryRow(ctx, `SELECT status,connection_id FROM accounts WHERE id=$1 FOR UPDATE`, id).Scan(&status, &incarnation)
 	if e == pgx.ErrNoRows {
 		return fail(404, "ACCOUNT_NOT_FOUND")
 	}
@@ -144,10 +203,38 @@ func (a *App) connect(w http.ResponseWriter, r *http.Request) error {
 	if e = a.finishDisconnects(ctx, tx, id); e != nil {
 		return e
 	}
+	if incarnation == nil {
+		v := ID()
+		incarnation = &v
+		if _, e = tx.Exec(ctx, `UPDATE accounts SET connection_id=$2 WHERE id=$1`, id, v); e != nil {
+			return e
+		}
+	}
+	connectionID := *incarnation
+	// A committed intent survives a lost response or a killed backend. Replays use
+	// this exact gateway incarnation rather than opening an untracked connection.
+	if e = tx.Commit(ctx); e != nil {
+		return e
+	}
+	tx, e = a.pool.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
+	if e = tx.QueryRow(ctx, `SELECT status,connection_id FROM accounts WHERE id=$1 FOR UPDATE`, id).Scan(&status, &incarnation); e != nil {
+		return e
+	}
+	if incarnation == nil || *incarnation != connectionID {
+		return fail(409, "CAS_CONFLICT")
+	}
+	if status != "idle" && status != "disconnected" {
+		return fail(409, "ILLEGAL_TRANSITION")
+	}
 	var out struct {
 		PlatformUserID string `json:"platformUserId"`
+		ConnectionID   string `json:"connectionId"`
 	}
-	e = a.gateway(ctx, "POST", "/accounts/"+id+"/connect", nil, &out)
+	e = a.gateway(ctx, "POST", "/accounts/"+id+"/connect", map[string]any{"connectionId": connectionID}, &out)
 	if e != nil {
 		code := externalCode(e)
 		if code == "ACCOUNT_SUSPENDED" || code == "SESSION_EXPIRED" {
@@ -161,10 +248,17 @@ func (a *App) connect(w http.ResponseWriter, r *http.Request) error {
 			if err := tx.Commit(ctx); err != nil {
 				return err
 			}
+		} else if code == "CONNECTION_ENDED" {
+			if _, err := tx.Exec(ctx, `UPDATE accounts SET connection_id=NULL WHERE id=$1 AND connection_id=$2`, id, connectionID); err != nil {
+				return err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return err
+			}
 		}
-		return e
+		return accountGatewayError(e)
 	}
-	if out.PlatformUserID == "" {
+	if out.PlatformUserID == "" || (out.ConnectionID != "" && out.ConnectionID != connectionID) {
 		return fail(502, "GATEWAY_PROTOCOL_ERROR")
 	}
 	if _, e = tx.Exec(ctx, `UPDATE accounts SET platform_user_id=$2 WHERE id=$1`, id, out.PlatformUserID); e != nil {
@@ -173,10 +267,12 @@ func (a *App) connect(w http.ResponseWriter, r *http.Request) error {
 	if e = transition(ctx, tx, id, status, "online", nil); e != nil {
 		return e
 	}
+	if e = writeAccountLog(ctx, tx, id, actor(ctx), "connect", nil); e != nil {
+		return e
+	}
 	if e = tx.Commit(ctx); e != nil {
 		return e
 	}
-	respond(w, 200, map[string]any{"status": "online", "platformUserId": out.PlatformUserID})
 	return nil
 }
 func (a *App) disconnectActions(ctx context.Context) {

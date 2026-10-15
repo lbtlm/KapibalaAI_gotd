@@ -1,0 +1,18 @@
+CREATE TABLE account_groups(id text PRIMARY KEY,name text NOT NULL UNIQUE CHECK(length(name) BETWEEN 1 AND 100),created_at timestamptz NOT NULL DEFAULT now());
+ALTER TABLE accounts ADD COLUMN group_id text REFERENCES account_groups ON DELETE SET NULL;
+ALTER TABLE accounts ADD COLUMN phone text;
+ALTER TABLE accounts ADD COLUMN phone_verified boolean NOT NULL DEFAULT false;
+ALTER TABLE accounts ADD COLUMN verification_source text CHECK(verification_source IN ('telegram','simulated'));
+ALTER TABLE accounts ADD COLUMN username text;
+ALTER TABLE accounts ADD COLUMN first_name text;
+ALTER TABLE accounts ADD COLUMN last_name text;
+ALTER TABLE accounts ADD COLUMN premium boolean;
+ALTER TABLE accounts ADD COLUMN last_checked_at timestamptz;
+ALTER TABLE accounts ADD COLUMN last_check_result text;
+ALTER TABLE accounts ADD COLUMN last_check_error text;
+ALTER TABLE accounts ADD COLUMN created_at timestamptz NOT NULL DEFAULT now();
+ALTER TABLE accounts ADD COLUMN connection_id text;
+CREATE TABLE account_imports(session_fingerprint text PRIMARY KEY,config_fingerprint text NOT NULL,account_id text NOT NULL UNIQUE,completed boolean NOT NULL DEFAULT false,created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE account_group_snapshots(account_id text PRIMARY KEY REFERENCES accounts,items jsonb NOT NULL,last_synced_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE account_logs(id bigserial PRIMARY KEY,account_id text NOT NULL REFERENCES accounts,actor text NOT NULL,action text NOT NULL,result text NOT NULL CHECK(result IN ('success','failed')),error_code text,created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX account_logs_page ON account_logs(account_id,id DESC);
