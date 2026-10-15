@@ -159,3 +159,5 @@ Iris · 前端工程师，沿用 Sol High，Fast未暴露。范围仅 AccountDet
 证据全部在忽略目录 .local/inspection-20261015/iris-i18/；没有真实姓名、手机号或群名加入Git，未触5173真实账号检查/连接/同步。现有实际栈accounts.spec只更新被替代的空态文案断言，未重复整套上传/C3/B4。主控部署后再做5173只读终验，当前本地结果不冒充已部署或真实链路验收。
 
 I18最终artifact收敛：主控指出tracked浏览器测试不应依赖预先存在的ignored输出目录。已全部改用testInfo.outputPath，颜色JSON通过testInfo.attach进入标准Playwright artifact；tracked测试不依赖本地runner/人工目录。本地仅把结果复制回上述证据目录供查看。仅定向复跑4项反馈用例，feedback-final.log 4 passed / 6.9s；typecheck-artifacts.log通过。没有重复12项unit或生产build；生产代码仍与已通过的新dist一致。全部完成后停止写入，SUBMITTED等待主控部署后只读终验。
+
+I18真实响应语义补充：主控确认Telegram读取成功但username确实为空。列表/详情原位增加verificationSource==='telegram'条件，分别显示“未设置用户名”/“未设置”；尚未读取或模拟来源仍“未获取”，不改API或填造username。先新增一个公共UI用例验证列表→详情，username-red.log缺少“未设置用户名”而失败；最小两处文案修改后username-green.log 1 passed（其余9项未重复，718ms），username-typecheck.log及username-build.log通过（3258 modules、6.43s）。已有12项/4项反馈用例不重复。此前0ee9290部署版5173只读验收的脱敏结果在iris-i18/final-5173.json：身份可见性布尔通过、群数量/角色符合主控已验事实、成功Tag对比度6.400、业务POST与console/pageerror均0；本次自建Web会话退出后refresh401确认撤销，没有真实PII截图。用户名文案的新部署版仍待主控提交/重建后终验，源码冻结SUBMITTED。

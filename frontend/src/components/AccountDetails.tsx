@@ -28,7 +28,7 @@ export default function AccountDetails({id,groups,writable,busy,error,onAction,o
   <Tabs activeKey={tab} onChange={setTab} items={[
    {key:'basic',label:'基础信息',children:<Descriptions bordered size="small" column={2} items={[
     {key:'id',label:'账号 ID',children:a.id},{key:'platform',label:'Telegram ID',children:a.platformUserId??'未获取'},
-    {key:'name',label:'昵称',children:accountName(a)},{key:'username',label:'用户名',children:a.username?'@'+a.username:'未获取'},
+    {key:'name',label:'昵称',children:accountName(a)},{key:'username',label:'用户名',children:a.username?'@'+a.username:a.verificationSource==='telegram'?'未设置':'未获取'},
     {key:'phone',label:'手机号来源',children:a.verificationSource==='simulated'?'模拟资料，未核验手机号':a.phoneVerified?'Telegram 已核验':a.phone?'导入资料，待检测核验':'未获取'},
     {key:'premium',label:'Premium',children:a.premium==null?'未获取':a.premium?'是':'否'},
     {key:'group',label:'账号分组',children:groups.find(g=>g.id===a.groupId)?.name??'未分组'},

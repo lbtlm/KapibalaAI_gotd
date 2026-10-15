@@ -42,3 +42,4 @@ F16验证收尾：新的Node22 SQLite实际上传用例、合成展示布局用�
 
 I18（2026-10-15）：日志结果复用既有 StatusTag / statusPositive / statusDanger，仅补 success 中文映射，替代 AccountDetails 内独立 AntD success/error Tag；无新CSS、主题或依赖。所属群空态原位复用 lastSyncedAt 与现有 React Query 缓存，未新增API、数据推断或“补资料”路径。既有同步失败不替换数据的行为保留，并补明确提示。新增AccountDetails公共UI/HTTP边界用例和极小production-browser颜色/空态回归，浏览器身份字段全部null、群数组为空；没有复制新仓库模块或引入真实账号数据。验证及红绿证据见tdd-frontend.md I18。
 I18浏览器证据生成最终复用Playwright testInfo.outputPath/attach，移除固定ignored输出与前置目录依赖；本地runner只负责选择production preview，不是tracked测试的运行前提。
+I18用户名语义补充复用既有verificationSource与列表/详情渲染，只区分“Telegram已读取且为空”和“尚未获取”，两处原位文本分支，没有新类型/API/默认资料或额外模块。

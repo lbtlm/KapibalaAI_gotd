@@ -18,6 +18,15 @@ test('合法转移按钮只显示在对应状态且viewer看不到写操作', as
  expect(screen.getAllByLabelText('释放账号',{selector:'button'})).toHaveLength(2)
 })
 test('viewer只读账号列表',async()=> {mount('viewer'); await screen.findByText('a0'); for(const name of ['连接并检测','检测','标记离线','释放账号','上传账号','管理分组','移动到分组'])expect(screen.queryByRole('button',{name})).not.toBeInTheDocument();expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()})
+test('Telegram已读取但用户名为空时，列表和详情明确显示未设置',async()=>{
+ const account={id:'account-1',status:'online',platformUserId:'10001',rateLimitedUntil:null,username:null,verificationSource:'telegram'}
+ server.use(http.get('/api/accounts',()=>HttpResponse.json([account])),http.get('/api/accounts/account-1',()=>HttpResponse.json(account)))
+ mount('viewer')
+ expect(await screen.findByText('未设置用户名')).toBeInTheDocument()
+ fireEvent.click(screen.getByLabelText('详情',{selector:'button'}))
+ const modal=await screen.findByRole('dialog')
+ expect(await within(modal).findByText('未设置',{exact:true})).toBeInTheDocument()
+})
 test('操作遭403显示权限反馈',async()=>{ server.use(http.post('/api/accounts/a0/check',()=>HttpResponse.json({error:{code:'FORBIDDEN',message:'denied'}},{status:403}))); mount('admin'); await screen.findByText('a0'); await userEvent.click(screen.getAllByRole('button',{name:'连接并检测'})[0]); expect(await screen.findByText('没有操作权限')).toBeInTheDocument() })
 
 test('账号管理完整显示手机号并按手机号、用户名和ID搜索，统计来自全部账号',async()=>{
