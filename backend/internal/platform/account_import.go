@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -70,7 +71,29 @@ func metadataID(raw map[string]json.RawMessage, key string) (int, error) {
 	}
 	return i, nil
 }
-func parseImportMetadata(b []byte) (registration, importProfile, error) {
+
+// Accept phone-shaped filenames, never arbitrary digits from labels or long IDs.
+var importFilenamePhone = regexp.MustCompile(`(?:^|[_ (])\+?([0-9]{7,15})(?:$|[_ )])`)
+
+func importPhone(value string) string {
+	value = strings.TrimSpace(value)
+	var phone strings.Builder
+	for i, c := range value {
+		switch {
+		case c >= '0' && c <= '9':
+			phone.WriteRune(c)
+		case c == '+' && i == 0, c == ' ', c == '-', c == '(', c == ')':
+		default:
+			return ""
+		}
+	}
+	if phone.Len() < 7 || phone.Len() > 15 {
+		return ""
+	}
+	return phone.String()
+}
+
+func parseImportMetadata(b []byte, basename string) (registration, importProfile, error) {
 	var out registration
 	var profile importProfile
 	var raw map[string]json.RawMessage
@@ -118,14 +141,56 @@ func parseImportMetadata(b []byte) (registration, importProfile, error) {
 		}
 		*dst = v
 	}
-	for key, dst := range map[string]**string{"phone": &profile.phone, "username": &profile.username, "first_name": &profile.firstName, "last_name": &profile.lastName} {
-		v, e := metadataString(raw, key)
-		if e != nil {
-			return out, profile, e
+	for _, field := range []struct {
+		keys []string
+		dst  **string
+	}{
+		{[]string{"username", "user_name"}, &profile.username},
+		{[]string{"first_name", "firstName"}, &profile.firstName},
+		{[]string{"last_name", "lastName"}, &profile.lastName},
+	} {
+		for _, key := range field.keys {
+			v, e := metadataString(raw, key)
+			if e != nil {
+				return out, profile, e
+			}
+			v = strings.TrimSpace(v)
+			if field.dst == &profile.username {
+				v = strings.TrimPrefix(v, "@")
+			}
+			if v != "" {
+				*field.dst = &v
+				break
+			}
 		}
-		if v != "" {
-			s := v
-			*dst = &s
+	}
+	for _, key := range []string{"phone", "phone_number", "phoneNumber"} {
+		v := raw[key]
+		if len(v) == 0 || bytes.Equal(v, []byte("null")) {
+			continue
+		}
+		var phone string
+		if json.Unmarshal(v, &phone) != nil {
+			var number json.Number
+			if json.Unmarshal(v, &number) != nil {
+				return out, profile, fail(400, "INVALID_METADATA")
+			}
+			phone = number.String()
+		}
+		if phone = importPhone(phone); phone != "" {
+			profile.phone = &phone
+			break
+		}
+	}
+	if profile.phone == nil {
+		phone := importPhone(basename)
+		if phone == "" {
+			if match := importFilenamePhone.FindStringSubmatch(basename); match != nil {
+				phone = match[1]
+			}
+		}
+		if phone != "" {
+			profile.phone = &phone
 		}
 	}
 	return out, profile, nil
@@ -242,7 +307,7 @@ func (a *App) importAccountPair(r *http.Request, pair *importFiles, group string
 	if !bytes.HasPrefix(pair.session, []byte("SQLite format 3\x00")) {
 		return "", fail(400, "INVALID_SESSION")
 	}
-	reg, profile, e := parseImportMetadata(pair.metadata)
+	reg, profile, e := parseImportMetadata(pair.metadata, pair.basename)
 	if e != nil {
 		return "", e
 	}

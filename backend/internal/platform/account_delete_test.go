@@ -149,7 +149,7 @@ func TestAccountDeleteGatewayOutagePreservesEligibleAccountData(t *testing.T) {
 		businessSQL(t, cfg, `INSERT INTO account_group_snapshots(account_id,items) VALUES($1,'[]')`, id)
 		businessSQL(t, cfg, `INSERT INTO account_logs(account_id,actor,action,result) VALUES($1,'business input','historical_input','success')`, id)
 		st, b, _ := call(t, s, "DELETE", "/api/accounts/"+id, token, "")
-		if st != 504 || b["error"].(map[string]any)["code"] != "NETWORK_TIMEOUT" {
+		if st != 503 || b["error"].(map[string]any)["code"] != "GATEWAY_UNAVAILABLE" {
 			t.Errorf("gateway outage concealed for %s: %d %v", status, st, b)
 		}
 		st, b, _ = call(t, s, "GET", "/api/accounts/"+id, token, "")

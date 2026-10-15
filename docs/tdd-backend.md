@@ -245,3 +245,8 @@ Red：/sequences/generate缺失，chat_completions、responses及未配置拒绝
 
 
 R25真实模型：已部署5173页面实际调用现有DeepSeek配置，deepseek-flash在7.896秒返回6步admin/member剧本，采用并保存为“AI 测试 · 周末读书会”。浏览器无运行错误；没有账号检测、群变更或消息发送。部署前后账号/日志/群快照/消息摘要一致，Gateway进程保持运行。证据为忽略目录ui-r25/real-ai-verification.json及页面截图。该结果只证明真实生成与保存，不证明剧本在Telegram执行。
+
+
+## R26 主控：导入资料回填
+
+Red：资料解析标准化、别名与数字手机号三个场景失败。Green：优先 JSON phone/phone_number/phoneNumber，缺少有效手机号时从配对文件名提取；读取 username/user_name、first_name/firstName、last_name/lastName，清理首尾空白及用户名 @ 前缀。文件名不能把任意标签、短编号或超长 ID 当作手机号。资料仍通过既有 INSERT 存储，默认未核验；既有 checkAccount 成功才使用 Telegram 权威资料替换，失败不抹除导入值。无数据库迁移或新的生命周期管理器。纯解析测试通过；隔离 PostgreSQL 占用拒绝与删除失败保留数据检查通过。后者旧断言仍期待 NETWORK_TIMEOUT，已与先前已修正的连接拒绝语义 503 GATEWAY_UNAVAILABLE 对齐。没有读取或上传真实 Session，没有连接 Telegram。
