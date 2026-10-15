@@ -134,18 +134,13 @@ func New(parent context.Context, c Config) (*Service, error) {
 	return s, nil
 }
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if s.ctx.Err() != nil {
-		fail(w, &APIError{503, "GATEWAY_UNAVAILABLE", 0})
+	ctx, stop, err := s.operationContext(r.Context())
+	if err != nil {
+		fail(w, err)
 		return
 	}
-	if checker, ok := s.store.(interface{ CheckLease(context.Context) error }); ok {
-		if checker.CheckLease(r.Context()) != nil {
-			s.cancel()
-			fail(w, &APIError{503, "GATEWAY_UNAVAILABLE", 0})
-			return
-		}
-	}
-	s.mux.ServeHTTP(w, r)
+	defer stop()
+	s.mux.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // Done closes on shutdown or a lost PostgreSQL writer lease.
@@ -153,14 +148,25 @@ func (s *Service) Done() <-chan struct{} { return s.ctx.Done() }
 
 // operationContext checks ownership after queueing and binds an RPC to service life.
 func (s *Service) operationContext(parent context.Context) (context.Context, func(), error) {
+	if err := parent.Err(); err != nil {
+		return nil, func() {}, err
+	}
 	if s.ctx.Err() != nil {
 		return nil, func() {}, ErrWriterLeaseLost
 	}
 	if checker, ok := s.store.(interface{ CheckLease(context.Context) error }); ok {
-		if err := checker.CheckLease(parent); err != nil {
+		leaseCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), 2*time.Second)
+		stopLease := context.AfterFunc(s.ctx, cancel)
+		err := checker.CheckLease(leaseCtx)
+		stopLease()
+		cancel()
+		if err != nil {
 			s.cancel()
 			return nil, func() {}, err
 		}
+	}
+	if err := parent.Err(); err != nil {
+		return nil, func() {}, err
 	}
 	ctx, cancel := context.WithCancel(parent)
 	stop := context.AfterFunc(s.ctx, cancel)
@@ -280,6 +286,12 @@ func (s *Service) accountHTTP(w http.ResponseWriter, r *http.Request) {
 	id, op := r.PathValue("accountId"), r.PathValue("operation")
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	opCtx, stop, err := s.operationContext(r.Context())
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	defer stop()
 	if err := s.accountError(id, false); err != nil {
 		fail(w, err)
 		return
@@ -299,8 +311,12 @@ func (s *Service) accountHTTP(w http.ResponseWriter, r *http.Request) {
 	case "connect":
 		if s.cfg.Telegram != nil {
 			s.mu.Unlock()
-			pid, e := s.cfg.Telegram.Connect(r.Context(), id)
+			pid, e := s.cfg.Telegram.Connect(opCtx, id)
 			s.mu.Lock()
+			if err := opCtx.Err(); err != nil {
+				fail(w, err)
+				return
+			}
 			if e != nil {
 				s.commitHTTP(w, r, 0, nil, s.accountFailure(id, e))
 				return
@@ -317,8 +333,12 @@ func (s *Service) accountHTTP(w http.ResponseWriter, r *http.Request) {
 	case "disconnect":
 		if s.cfg.Telegram != nil {
 			s.mu.Unlock()
-			e := s.cfg.Telegram.Disconnect(r.Context(), id)
+			e := s.cfg.Telegram.Disconnect(opCtx, id)
 			s.mu.Lock()
+			if err := opCtx.Err(); err != nil {
+				fail(w, err)
+				return
+			}
 			if e != nil {
 				s.commitHTTP(w, r, 0, nil, s.accountFailure(id, e))
 				return

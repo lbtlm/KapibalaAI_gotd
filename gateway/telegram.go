@@ -119,6 +119,9 @@ func (a *TelegramAdapter) Resume(s *Service) {
 func (a *TelegramAdapter) Connect(ctx context.Context, id string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if s := a.sessions[id]; s != nil {
 		return stringID(s.self.ID), nil
 	}
@@ -177,6 +180,10 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (string, error
 			cancel()
 			return "", platformError(err)
 		}
+		if err := connectCtx.Err(); err != nil {
+			cancel()
+			return "", platformError(err)
+		}
 		a.sessions[id] = s
 		return stringID(s.self.ID), nil
 	case <-connectCtx.Done():
@@ -186,6 +193,10 @@ func (a *TelegramAdapter) Connect(ctx context.Context, id string) (string, error
 }
 func (a *TelegramAdapter) Disconnect(ctx context.Context, id string) error {
 	a.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		a.mu.Unlock()
+		return err
+	}
 	s := a.sessions[id]
 	if s != nil {
 		delete(a.sessions, id)
