@@ -1,6 +1,6 @@
 # Account management inspection — 2026-10-15
 
-Status: approved implementation, revision 1. Tracking: GitHub issue #4, one PR into dev, multiple focused commits. Baseline: dc0db77. Controller owns integration, Git and acceptance.
+Status: approved implementation, revision 3. Tracking: GitHub issue #4, PR #5 into dev, multiple focused commits. Branch: fix/account-inspection-20261015; baseline: dc0db77. Controller owns integration, Git and acceptance.
 
 ## Approved behavior
 
@@ -32,18 +32,18 @@ Use public-boundary TDD with concise red/green records in component documents. C
 
 ## Shared API
 
-Revision 2: the following names are frozen for this batch. Preserve existing account/group list envelopes and A1 endpoints. All identifiers are strings; timestamps ISO8601 UTC or null. User-facing write operations require admin.
+Revision 3: the following names are frozen for this batch. Preserve existing account/group list envelopes and A1 endpoints. All identifiers are strings; timestamps ISO8601 UTC or null. User-facing write operations require admin. The verification source addition below prevents simulated checks from claiming real Telegram verification.
 
 ### Gateway (internal, existing trusted network boundary)
 
 - `POST /accounts/register`: `{accountId,session,apiId,apiHash,deviceModel?,systemVersion?,appVersion?}`. `session` is base64 Telethon SQLite bytes; backend parses metadata aliases, gateway independently validates credentials/session. Response `{accountId,status:"idle"}`. Same account ID and identical authorization/configuration fingerprint replays without replacing data; conflicting data is `409 ACCOUNT_IMPORT_CONFLICT`. Persist config and converted Session atomically. Do not log/echo credentials. Detect duplicate authorization registered under another account ID.
-- `POST /accounts/:id/check`: online-only, fenced Self query; returns `{platformUserId,phone,username,firstName,lastName,premium}`. Nullable unavailable strings; no implicit connection.
+- `POST /accounts/:id/check`: online-only, fenced Self query; returns `{platformUserId,phone,username,firstName,lastName,premium,source}`. `source=telegram|simulated`; nullable unavailable strings; no implicit connection. Fake mode explicitly returns simulated evidence and cannot verify a real phone.
 - `GET /accounts/:id/joined-groups`: online-only, all pages or error; returns `{items:[{id,title,username,type,role}]}`. `type=group|supergroup`; `role=creator|admin|member|unknown`; username nullable. No broadcasting channels or automatic managed-group registration.
 - Existing connect accepts optional `{connectionId}` and echoes it alongside platformUserId; old body-less requests remain compatible. An ordinary final Run exit persists `account_status {accountId,status:"offline",connectionId}`. Only matching current incarnation may become disconnected in backend, and only from online/rate_limited. Clear/reject stale incarnations after explicit offline or terminal transitions. Persist connection intent before external connection; interrupted/ambiguous results must be safely reconcilable. Existing terminal events remain compatible.
 
 ### Business API (frontend contract)
 
-- `GET /api/accounts` stays a bare Account array; `GET /api/accounts/:id` returns one Account. Existing fields remain. Add nullable `phone,username,firstName,lastName,groupId,lastCheckedAt`, boolean `phoneVerified`, nullable boolean `premium`, `createdAt`, nullable `lastCheckResult` (`success|failed`) and `lastCheckError` (safe code/summary). Missing optional values render as not acquired; a file name is not verified phone identity.
+- `GET /api/accounts` stays a bare Account array; `GET /api/accounts/:id` returns one Account. Existing fields remain. Add nullable `phone,username,firstName,lastName,groupId,lastCheckedAt`, boolean `phoneVerified`, nullable boolean `premium`, `createdAt`, nullable `lastCheckResult` (`success|failed`), `lastCheckError` (safe code/summary) and `verificationSource` (`telegram|simulated`). Missing optional values render as not acquired; a file name is not verified phone identity. Only a real Telegram result with a nonempty phone can set phoneVerified; simulated values must not overwrite an imported phone or be displayed as real verification. UI labels simulated checks explicitly.
 - `POST /api/accounts/import`: multipart repeated `files` fields and optional `groupId`; returns `{results:[{basename,accountId:null|string,success:boolean,error:null|{code,message}}]}`. Require same-basename pairs, reject duplicate basenames and ambiguity. Backend persists a credential-free import intent/stable ID before registration, then completes account creation; retries can recover pending registration. Already completed imports report an explicit duplicate result without overwriting.
 - `POST /api/accounts/:id/check`: `{connectIfNeeded:boolean}` -> Account. Only explicit true may connect idle/disconnected using A1; terminal remains terminal. Persist check result/profile and a safe operation log. Network errors cannot be misclassified as terminal errors.
 - `GET /api/accounts/:id/joined-groups`, `POST /api/accounts/:id/joined-groups/sync` -> `{items:[gateway group DTO],lastSyncedAt:null|string}`. GET only reads cached data. Sync requires online; replace the snapshot only after complete success, retain old data on failure.
