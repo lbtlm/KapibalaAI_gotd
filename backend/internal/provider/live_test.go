@@ -27,9 +27,9 @@ func TestLiveProviderToolConversationAndAudit(t *testing.T) {
 	defer p.Close()
 	s := httptest.NewServer(p.Handler())
 	defer s.Close()
-	contextText := `{"groupId":"smoke","triggerMessages":[{"msgId":"m1","senderPlatformUserId":"outside","text":"这是一项授权的模型工具协议测试。请先调用get_recent_messages读取最新历史，再调用send_message回复你好，最后finish。所有工具结果均为测试模拟，不连接Telegram。","sentAt":"2026-10-14T14:00:00Z"}],"policy":{"autoKickEnabled":false},"ownPlatformUserIds":[]}`
+	contextText := `{"groupId":"smoke","triggerMessages":[{"msgId":"m1","senderPlatformUserId":"outside","text":"这是一项授权的只读模型工具协议测试。请先调用get_recent_messages读取测试输入，再调用finish。禁止调用send_message或kick_user；不会连接Telegram或执行平台操作。","sentAt":"2026-10-14T14:00:00Z"}],"policy":{"autoKickEnabled":false},"ownPlatformUserIds":[]}`
 	req := domain.TurnRequest{RunID: "live-smoke", Tools: domain.Tools(), Messages: []domain.ChatMessage{{Role: "user", Content: []domain.Block{{Type: "text", Text: contextText}}}}}
-	sawRead, sawSend, finished := false, false, false
+	sawRead, finished := false, false
 	for n := 0; n < 6; n++ {
 		st, out := post(t, s, "/agent/turn", req)
 		if st != 200 || len(out.Content) != 1 {
@@ -49,22 +49,19 @@ func TestLiveProviderToolConversationAndAudit(t *testing.T) {
 		case "get_recent_messages":
 			sawRead = true
 			result = `{"messages":[{"msgId":"m1","senderPlatformUserId":"outside","isOwn":false,"text":"你好","sentAt":"2026-10-14T14:00:00Z"}],"truncated":false}`
-		case "send_message":
-			sawSend = true
-			result = `{"clientMsgId":"simulated-client","deliveryStatus":"sent"}`
 		case "finish":
 			finished = true
 			result = `{"ok":true}`
 		default:
-			result = `{"code":"POLICY_DENIED","message":"smoke does not remove users"}`
+			t.Fatalf("read-only provider smoke requested forbidden tool %s", b.Name)
 		}
 		req.Messages = append(req.Messages, domain.ChatMessage{Role: "assistant", Content: out.Content}, domain.ChatMessage{Role: "user", Content: []domain.Block{{Type: "tool_result", ToolUseID: b.ID, Content: result}}})
 		if finished {
 			break
 		}
 	}
-	if !sawRead || !sawSend || !finished {
-		t.Fatalf("tool conversation incomplete read=%t send=%t finish=%t", sawRead, sawSend, finished)
+	if !sawRead || !finished {
+		t.Fatalf("tool conversation incomplete read=%t finish=%t", sawRead, finished)
 	}
 	body, _ := json.Marshal(map[string]any{"text": "你好，收到你的消息。", "groupId": "smoke"})
 	res, e := s.Client().Post(s.URL+"/agent/audit", "application/json", bytes.NewReader(body))

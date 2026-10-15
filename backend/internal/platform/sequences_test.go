@@ -1,18 +1,15 @@
 package platform_test
 
 import (
-	"context"
-	"github.com/lbtlm/KapibalaAI_gotd/backend/internal/platform"
 	"sync"
 	"testing"
 )
 
 func TestSequencePreflightRejectsWithoutRunningAndConcurrentStartHasOneWinner(t *testing.T) {
-	g := gatewayFixture(t)
-	a, s := fixture(t, platform.Config{GatewayURL: g.server.URL})
-	a.Start(context.Background())
+	_, s, cfg := fixtureConfig(t)
+	group := insertBusinessGroup(t, cfg)
 	token, _ := login(t, s, "admin")
-	group := createGroup(t, s, token)
+
 	st, b, _ := call(t, s, "POST", "/api/sequences", token, `{"name":"test","steps":[{"index":1,"accountRole":"admin","text":"{event}","delaySeconds":1},{"index":2,"accountRole":"member","text":"{event}","delaySeconds":1},{"index":3,"accountRole":"member","text":"{missing}","delaySeconds":1}]}`)
 	if st != 200 && st != 201 {
 		t.Fatalf("create sequence %d %v", st, b)

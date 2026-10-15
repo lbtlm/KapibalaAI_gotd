@@ -9,7 +9,8 @@ import (
 )
 
 func TestWebSocketAuthenticatedReplayHasCommittedMonotonicSequence(t *testing.T) {
-	_, s := fixture(t)
+	_, s, cfg := fixtureConfig(t)
+	insertAccountRows(t, cfg, "account-1")
 	token, _ := login(t, s, "admin")
 	call(t, s, "POST", "/api/accounts/account-1/transition", token, `{"expectedFrom":"idle","to":"suspended"}`)
 	c, _, e := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(s.URL, "http")+"/ws", nil)

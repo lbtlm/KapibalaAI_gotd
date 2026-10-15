@@ -86,7 +86,7 @@ func (a *App) checkAccount(w http.ResponseWriter, r *http.Request) (err error) {
 		Source         string  `json:"source"`
 	}
 	gatewayErr := a.gateway(ctx, "POST", "/accounts/"+id+"/check", nil, &profile)
-	if gatewayErr == nil && (profile.PlatformUserID == "" || (current.PlatformUserID != nil && *current.PlatformUserID != profile.PlatformUserID) || (profile.Source != "telegram" && profile.Source != "simulated")) {
+	if gatewayErr == nil && (profile.PlatformUserID == "" || (current.PlatformUserID != nil && *current.PlatformUserID != profile.PlatformUserID) || profile.Source != "telegram") {
 		gatewayErr = fail(502, "GATEWAY_PROTOCOL_ERROR")
 	}
 	if gatewayErr != nil {
@@ -117,13 +117,6 @@ func (a *App) checkAccount(w http.ResponseWriter, r *http.Request) (err error) {
 		}
 		logged = true
 		return accountGatewayError(gatewayErr)
-	}
-	if profile.Source == "simulated" {
-		profile.Phone = current.Phone
-		profile.Username = current.Username
-		profile.FirstName = current.FirstName
-		profile.LastName = current.LastName
-		profile.Premium = current.Premium
 	}
 	_, e = tx.Exec(ctx, `UPDATE accounts SET platform_user_id=$2,phone=$3,phone_verified=$4,username=$5,first_name=$6,last_name=$7,premium=$8,last_checked_at=now(),last_check_result='success',last_check_error=NULL,verification_source=$9 WHERE id=$1`, id, profile.PlatformUserID, profile.Phone, profile.Source == "telegram" && profile.Phone != nil && *profile.Phone != "", profile.Username, profile.FirstName, profile.LastName, profile.Premium, profile.Source)
 	if e != nil {
@@ -170,7 +163,7 @@ func (a *App) joinedGroups(w http.ResponseWriter, r *http.Request) error {
 	if e != nil && e != pgx.ErrNoRows {
 		return e
 	}
-	if len(raw) > 0 {
+	if len(raw) > 0 && v.LastSyncedAt != nil {
 		if e = json.Unmarshal(raw, &v.Items); e != nil {
 			return e
 		}

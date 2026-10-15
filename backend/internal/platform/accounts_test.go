@@ -6,7 +6,8 @@ import (
 )
 
 func TestConcurrentAccountCASHasOneWinnerAndTerminalCannotReconnect(t *testing.T) {
-	_, s := fixture(t)
+	_, s, cfg := fixtureConfig(t)
+	insertAccountRows(t, cfg, "account-1")
 	token, _ := login(t, s, "admin")
 	var wg sync.WaitGroup
 	statuses := make(chan int, 2)

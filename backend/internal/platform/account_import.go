@@ -289,7 +289,67 @@ func (a *App) importAccountPair(r *http.Request, pair *importFiles, group string
 		return id, fail(409, "ACCOUNT_IMPORT_CONFLICT")
 	}
 	if completed {
-		return id, fail(409, "ACCOUNT_ALREADY_IMPORTED")
+		var evidence struct {
+			AccountID string  `json:"accountId"`
+			Status    string  `json:"status"`
+			Source    *string `json:"source"`
+		}
+		if e = a.gateway(ctx, "GET", "/accounts/"+id+"/registration", nil, &evidence); e != nil {
+			return id, accountGatewayError(e)
+		}
+		if evidence.AccountID != id {
+			return id, fail(502, "GATEWAY_PROTOCOL_ERROR")
+		}
+		switch evidence.Status {
+		case "ready":
+			if evidence.Source == nil || (*evidence.Source != "upload" && *evidence.Source != "manifest") {
+				return id, fail(502, "GATEWAY_PROTOCOL_ERROR")
+			}
+			return id, fail(409, "ACCOUNT_ALREADY_IMPORTED")
+		case "incomplete":
+			return id, fail(409, "REGISTRATION_INCOMPLETE")
+		case "absent":
+			if evidence.Source != nil {
+				return id, fail(502, "GATEWAY_PROTOCOL_ERROR")
+			}
+		default:
+			return id, fail(502, "GATEWAY_PROTOCOL_ERROR")
+		}
+		// Absence is established without RPC. Persist recovery before registration;
+		// an interrupted retry can retain the same account and its business history.
+		var status string
+		e = tx.QueryRow(ctx, `SELECT status FROM accounts WHERE id=$1 FOR UPDATE`, id).Scan(&status)
+		if e != nil && e != pgx.ErrNoRows {
+			return id, e
+		}
+		if status == "online" || status == "rate_limited" {
+			if e = transition(ctx, tx, id, status, "disconnected", nil); e != nil {
+				return id, e
+			}
+		}
+		if _, e = tx.Exec(ctx, `UPDATE accounts SET connection_id=NULL WHERE id=$1`, id); e != nil {
+			return id, e
+		}
+		if _, e = tx.Exec(ctx, `UPDATE account_imports SET completed=false WHERE session_fingerprint=$1`, sessionHash); e != nil {
+			return id, e
+		}
+		if e = tx.Commit(ctx); e != nil {
+			return id, e
+		}
+		tx, e = a.pool.Begin(ctx)
+		if e != nil {
+			return id, e
+		}
+		defer tx.Rollback(ctx)
+		if e = tx.QueryRow(ctx, `SELECT config_fingerprint,completed FROM account_imports WHERE session_fingerprint=$1 FOR UPDATE`, sessionHash).Scan(&existing, &completed); e != nil {
+			return id, e
+		}
+		if existing != configHash {
+			return id, fail(409, "ACCOUNT_IMPORT_CONFLICT")
+		}
+		if completed {
+			return id, fail(409, "ACCOUNT_ALREADY_IMPORTED")
+		}
 	}
 	var groupID *string
 	if group != "" {
@@ -313,13 +373,18 @@ func (a *App) importAccountPair(r *http.Request, pair *importFiles, group string
 	if out.AccountID != id || out.Status != "idle" {
 		return id, fail(502, "GATEWAY_PROTOCOL_ERROR")
 	}
-	if _, e = tx.Exec(ctx, `INSERT INTO accounts(id,group_id,phone,username,first_name,last_name) VALUES($1,$2,$3,$4,$5,$6)`, id, groupID, profile.phone, profile.username, profile.firstName, profile.lastName); e != nil {
+	inserted, e := tx.Exec(ctx, `INSERT INTO accounts(id,group_id,phone,username,first_name,last_name) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO NOTHING`, id, groupID, profile.phone, profile.username, profile.firstName, profile.lastName)
+	if e != nil {
 		return id, e
 	}
 	if _, e = tx.Exec(ctx, `UPDATE account_imports SET completed=true WHERE session_fingerprint=$1`, sessionHash); e != nil {
 		return id, e
 	}
-	if e = writeAccountLog(ctx, tx, id, actor(ctx), "import", nil); e != nil {
+	action := "import"
+	if inserted.RowsAffected() == 0 {
+		action = "import_recovered"
+	}
+	if e = writeAccountLog(ctx, tx, id, actor(ctx), action, nil); e != nil {
 		return id, e
 	}
 	if e = tx.Commit(ctx); e != nil {

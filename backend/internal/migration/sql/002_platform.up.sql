@@ -1,5 +1,4 @@
 CREATE TABLE accounts(id text PRIMARY KEY, status text NOT NULL DEFAULT 'idle' CHECK(status IN ('idle','online','rate_limited','disconnected','suspended','session_expired')), platform_user_id text UNIQUE, rate_limited_until timestamptz);
-INSERT INTO accounts(id) VALUES('account-1'),('account-2'),('account-3');
 CREATE TABLE ws_clock(id integer PRIMARY KEY CHECK(id=1),seq bigint NOT NULL DEFAULT 0);
 INSERT INTO ws_clock(id) VALUES(1);
 CREATE TABLE ws_events(seq bigint PRIMARY KEY,type text NOT NULL,payload jsonb NOT NULL);
