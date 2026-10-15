@@ -6,7 +6,7 @@
 
 ## Docker Compose
 
-需要 Docker Engine / Docker Desktop（Linux 容器）和 Compose v2。Go、Node.js、pnpm 和 PostgreSQL 都由容器提供，本机不必另装。网络需要能拉取镜像、下载构建依赖，以及访问 Telegram 和选定模型 API。新机器先克隆 `dev` 分支，或检出指定交付提交；[PR #5](https://github.com/lbtlm/KapibalaAI_gotd/pull/5) 已合入 `dev`。
+需要 Docker Engine / Docker Desktop（Linux 容器）和 Compose v2。Go、Node.js、pnpm 和 PostgreSQL 都由容器提供，本机不必另装。网络需要能拉取镜像、下载构建依赖，以及访问 Telegram 和选定模型 API。新机器默认克隆 `main` 稳定分支，或检出指定交付提交；`dev` 用于开发集成。
 
 ### 配置文件如何读取
 

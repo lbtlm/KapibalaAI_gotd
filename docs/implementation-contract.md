@@ -8,7 +8,7 @@ User explicitly removed account/gateway simulation, including related test doubl
 
 ## Sources and precedence
 
-`docs/全栈开发工程师笔试题-候选人版.md` is the normative HTTP/SSE/WS and behavioral contract. User overrides: Go backend, Telegram gotd and real Session acceptance; OpenAI-compatible DeepSeek instead of Claude/Gemini. Keep the examination's external agent tool-block envelope by translating inside the provider service. Do not contact Anthropic. Original source documents remain unchanged.
+This document records the agreed HTTP/SSE/WS behavior and implementation boundaries. Routes and call paths are listed in [API flow coverage](api-flow-coverage.md); acceptance criteria and unresolved differences are tracked in [requirements audit](requirements-audit.md). User choices: Go backend, Telegram gotd and real Session acceptance; OpenAI-compatible DeepSeek instead of Claude/Gemini. Preserve the external Agent tool-block envelope through translation inside the provider service. Do not contact Anthropic. The original recruitment documents were removed during delivery cleanup at the user's request; historical clause IDs remain for evidence traceability.
 
 ## Ownership
 

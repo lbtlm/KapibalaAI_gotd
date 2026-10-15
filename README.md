@@ -10,7 +10,7 @@
 
 Kapibala AI 是一个管理 Telegram 服务账号、群组和消息的操作台。操作员可以导入账号、建立或接管群组、按剧本分配成员发言，并由绑定管理员的 AI Agent 处理外部成员消息。账号、消息、任务和 Agent 步骤均保留可追溯记录。
 
-项目依据 [全栈开发工程师笔试题](docs/全栈开发工程师笔试题-候选人版.md) 实现，按用户确认采用 **Go / gotd、真实 Telegram 网关和独立 DeepSeek provider**。原题、用户调整与当前差距分别记录，当前版本尚未完成全部异常场景验收。
+项目采用 **Go / gotd、真实 Telegram 网关和独立 DeepSeek provider**。已确认的行为与范围见 [实现契约](docs/implementation-contract.md)，操作与验证入口见 [验收指南](docs/acceptance-guide.md)；当前版本尚未完成全部异常场景验收。
 
 [快速开始](#quick-start) · [功能](#capabilities) · [操作流程](#workflow) · [架构](#architecture) · [需求覆盖](#requirements) · [验证与限制](#verification) · [常见问题](#faq) · [文档](#documentation) · [参与开发](#contributing)
 
@@ -22,7 +22,7 @@ Kapibala AI 是一个管理 Telegram 服务账号、群组和消息的操作台�
 
 ## 快速开始
 
-需要 **Docker Engine / Docker Desktop（Linux 容器）与 Compose v2**，以及可访问镜像源、构建依赖、Telegram 和模型 API 的网络。本机不必安装 Go、Node.js、pnpm 或 PostgreSQL。新机器先克隆仓库的 `dev` 分支，或检出指定交付提交；[PR #5](https://github.com/lbtlm/KapibalaAI_gotd/pull/5) 已合入 `dev`，`main` 不代表最新开发进度。
+需要 **Docker Engine / Docker Desktop（Linux 容器）与 Compose v2**，以及可访问镜像源、构建依赖、Telegram 和模型 API 的网络。本机不必安装 Go、Node.js、pnpm 或 PostgreSQL。新机器默认使用 `main` 稳定分支，或检出指定交付提交；`dev` 用于开发集成。
 
 以下命令在仓库根目录执行，路径按实际克隆位置替换。统一使用与 `compose.yaml` 同目录的 **根目录 `.env`**，Compose 自动读取，已有配置不会被覆盖：
 
@@ -229,7 +229,7 @@ flowchart LR
 | 从零启动、端口、数据库、真实 AI 配置 | [启动指南](docs/getting-started.md) |
 | 按要求查看页面、API 与证据 | [验收指南](docs/acceptance-guide.md) · [API 流程覆盖](docs/api-flow-coverage.md) |
 | 还有什么没完成、没验证 | [当前要求审计](docs/requirements-audit.md) |
-| 原题与经确认的调整 | [笔试原文](docs/全栈开发工程师笔试题-候选人版.md) · [实现契约](docs/implementation-contract.md) · [群工作区补充](docs/workspace-refinement-20261015.md) |
+| 实现约定与功能范围 | [实现契约](docs/implementation-contract.md) · [群工作区补充](docs/workspace-refinement-20261015.md) |
 | 复用来源及适配 | [Backend](docs/reuse-backend.md) · [Gateway](docs/reuse-gateway.md) · [Frontend](docs/reuse-frontend.md) |
 | 红绿测试、历史现场结果 | [Backend TDD](docs/tdd-backend.md) · [Gateway TDD](docs/tdd-gateway.md) · [Frontend TDD](docs/tdd-frontend.md) · [历史验收矩阵](docs/验收矩阵.md) |
 | CI 分层、备份、升级与回滚 | [运维说明](docs/operations.md) · [交付测试记录](docs/tdd-delivery.md) |

@@ -2,7 +2,7 @@
 
 [返回 README](../README.md) · [启动指南](getting-started.md) · [当前差距](requirements-audit.md) · [API 流程覆盖](api-flow-coverage.md)
 
-本指南按“看到什么、如何操作、检查什么、证据到哪里查”组织。规范来源为 [原始要求](全栈开发工程师笔试题-候选人版.md)，已确认的调整见 [实现契约](implementation-contract.md)。**页面截图、接口存在、自动化通过与真实平台验收是不同证据，不能互相替代。**
+本指南按“看到什么、如何操作、检查什么、证据到哪里查”组织。功能约定见 [实现契约](implementation-contract.md)，接口与调用链见 [API 流程覆盖](api-flow-coverage.md)。**页面截图、接口存在、自动化通过与真实平台验收是不同证据，不能互相替代。**
 
 ## 准备环境
 
