@@ -260,3 +260,5 @@ Red：新增模型回复预演 HTTP 测试首先得到404；暂停接口权限�
 命令：`go test ./internal/provider -run 'Test(ReplyPreview|SequenceGeneration|ChatProvider)' -count=1`；`go test ./internal/platform -run 'Test(PauseMarketing|GroupAgentSession|SlowFinalTurn)' -count=1`；`go test ./internal/platform -run 'Test(CancelledCampaign|Agent|DuplicateTool|SequencePreflight|ScriptPreview|EndMarketing|OwnedMessages|GroupAdministrator)' -count=1`。均使用独立inspection数据库，不使用现场Session，不模拟Gateway成功。
 
 真实DeepSeek协议测试 `TestLiveProviderToolConversationAndAudit` 完成读取工具→finish与pass审计；合成内容且不连接Telegram。预演接口与此协议证据分别验证，不等同真实群发送或退群验收。主控按用户明确要求独立检查暂停准入、在途确认、恢复互斥、锁顺序及既有单run约束，没有委派独立reviewer。
+
+R27 部署验收：本机5173已部署代码候选fa08768，schema版本11；Gateway容器ID及启动时间保持一致，前端/后端/Agent更新，运行模式openai。部署后再次执行实际浏览器800/1366/1920/2560布局、标签不重叠、外部提示已读消失、剧本变量即时预览与后台预检确认取消、聊天定位最新、日志表格检查，页面无异常且未触发业务写入。AI回复预演调用真实deepseek-flash，用时2.425秒，针对合成活动背景返回59字相关回复；预演未发送Telegram消息。真实模型工具协议复测4.69秒通过。忽略目录ui-r27保存截图与结果；不把该证据等同真实群暂停/恢复/发送/退群验收。
