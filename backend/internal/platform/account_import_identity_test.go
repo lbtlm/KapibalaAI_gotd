@@ -18,7 +18,7 @@ func TestImportIdentityIsStableOnlyForThePersistedIntentAndKeepsLegacyFingerprin
 			t.Fatal(st, b)
 		}
 		item := b["results"].([]any)[0].(map[string]any)
-		if item["success"] != false || item["error"].(map[string]any)["code"] != "NETWORK_TIMEOUT" {
+		if item["success"] != false || item["error"].(map[string]any)["code"] != "GATEWAY_UNAVAILABLE" {
 			t.Fatalf("input must fail at the absent gateway without claiming Session success: %v", item)
 		}
 		return item["accountId"].(string)

@@ -297,3 +297,9 @@ Red：`TestRateLimitExpiresWithoutQueuedMessagesAcrossInstances` 在真实PG中�
 执行证据：19个叶子场景定向race通过，无race报告；其中主批12个顶层测试（含7个审计子例）71.797秒，追加同key测试9.181秒。实际审计超时与强杀两例普通模式32.923秒通过，超时场景不在race重复等待；vet ./internal/platform通过。没有重跑网关/媒体/前端/真实平台及全量测试。正确实现补覆盖首次即绿，不捏造红阶段。
 
 首个沙箱PG连接失败属于环境失败，升级本地测试执行权限后通过。第一次强杀测试在测试HTTP服务关闭时因未读取请求体阻塞，定点停止该测试进程，补齐请求体读取后复测通过；未修改产品审计逻辑以规避测试。子进程helper传递fixture临时media目录。全部使用隔离schema及Agent协议HTTP服务，无网关模拟成功、真实账号或真实模型请求。完整剩余边界见 [要求审计](requirements-audit.md)。
+
+## R36 发布 CI 的旧断言对齐
+
+首次发布 full CI（run 38779940632）发现三处旧预期：两项导入测试仍将连接拒绝断言为 NETWORK_TIMEOUT，退群 / 删除并发测试仍将已进入 ending 的群断言为 active_job。现有 R22 明确区分 GATEWAY_UNAVAILABLE 与超时，R23 的 leave-all 在同一事务中将群置为 ending；删除校验先检查尚未退出的群。因此仅更新测试到既有精确错误码 / 原因，增加已受理群仍为 ending 的状态断言，保留原有身份稳定性、历史数据、HTTP 409、运行中任务和无悬空账号检查，不改变运行代码。
+
+独立空 PostgreSQL 与真实空 Telegram 模式网关复现相同三个 RED（2.116s），修正后三个测试及其三个并发子例全部 GREEN（2.153s）。定向七个顶层测试 race 通过（24.899s），包含传输错误分类、占用 / viewer 拒绝、网关不可用时数据保留和锁后重新核验；无跳过或 race 报告。没有加载 Session、调用真实 Telegram / LLM，也未重启已人工验证的应用容器。失败的首次 CI 保留为历史证据，最终发布以修正后的 PR 检查结果为准。

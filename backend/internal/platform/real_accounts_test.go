@@ -72,7 +72,7 @@ func TestCompletedImportRequiresCredentialEvidenceAndPreservesBusinessDataOnOuta
 		t.Fatal(st, b)
 	}
 	result = b["results"].([]any)[0].(map[string]any)
-	if result["success"] != false || result["error"].(map[string]any)["code"] != "NETWORK_TIMEOUT" {
+	if result["success"] != false || result["error"].(map[string]any)["code"] != "GATEWAY_UNAVAILABLE" {
 		t.Fatalf("completed import bypassed real credential evidence: %d %v", st, b)
 	}
 	st, b, _ = call(t, s, "GET", "/api/accounts/"+id, token, "")
