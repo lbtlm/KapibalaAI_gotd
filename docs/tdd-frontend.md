@@ -108,3 +108,21 @@ PR #3 CI `38673104348` frontend 首轮 24 passed / 1 failed；R1→WS R2 用例�
 主控在固定 `3c5192b` 独立复核完成后解除指定测试/TDD 冻结。仅该状态测试建立 R1 的两次按钮操作改为已有 aria-label 查询、明确等待预检按钮 enabled，并用 fireEvent.click；确认按钮仍断言 enabled。真实 UI→HTTP 启动与本地 runId、全部 WS 帧、R1/R2 完成和保留断言均保留。复用现有 fireEvent/waitFor，无新增模块或依赖；替换旧两次完整 pointer/focus 设置流程。独立预检确认测试继续使用 userEvent。未提高测试 timeout、未修改生产逻辑或 B4 三秒阈值，也未制造生产 red。
 
 原配置验证：`pnpm exec vitest run src/pages/Sequences.test.tsx -t R1 --reporter verbose` exit 0，1 passed，1941 ms（`a2/r2-focused.log`）；`pnpm exec vitest run src/pages/Sequences.test.tsx src/api/realtime.test.ts` exit 0，8 passed，该状态用例 1700 ms（`a2/r2-affected.log`）；`pnpm typecheck` exit 0（`a2/r2-typecheck.log`）。日志均位于 `.local/repairs-20261015/iris/`。仅测试和文档改变，按授权不重复生产 build 或 B4/完整套件。远端 CI 与最终验收由主控完成；本次提交为 SUBMITTED。
+
+## F16 attempt1 revision1：账号管理（2026-10-15）
+
+Iris · 前端工程师。按 account-inspection-20261015.md revision3 冻结契约，沿用已批准 AntD 方向；只写 frontend 与所属文档。先 CodeGraph 定位 Accounts/AccountTableColumns/MainLayout/api 调用链；主控报告 auto-sync 锁竞争停止后，对编辑文件直接核对磁盘。已读 interface-design、TDD、tests/mocking、实现合同及规范 A1/UI；公共 seam 沿用批准的浏览器 UI、HTTP、WS。未操作真实账号、切分支、commit/push 或部署。
+
+| 切片 | 实际 red | 实现及 green |
+|---|---|---|
+| 完整身份与搜索 | `pnpm exec vitest run src/pages/Accounts.test.tsx -t '账号管理完整'`：旧界面找不到“账号管理”，缺完整手机号与搜索，search-red.log | 账号表格原位扩列、手机号复制、用户名/手机号/ID 搜索、实际计数、分组/状态筛选、分页；搜索行为在 search-green.log 已绿（当次文件的旧合法按钮测试因 role 查询耗时失败，未把整次记绿）。 |
+| 详情只读 | `... -t '详情打开'`：旧详情按钮不打开 Modal，details-red.log | 1080px Modal 三标签；仅读 account/cached groups/logs；viewer无写入口、离线提示连接、unknown独立角色。后续 management-unit.log 该项绿。 |
+| 多文件配对 | `... -t '多账号上传'`：旧上传入口没有 Modal，import-red.log | 原生多选文件+AntD预览表；缺失/重复/不支持文件阻止提交，多组完整才启用；account-unit-final.log 配对项绿。真实 multipart 与逐项结果留真实浏览器，不以 jsdom/MSW 替代。 |
+| 分组 CRUD | `... -t '管理员创建'`：旧界面无管理入口，groups-red.log | 创建/原位重命名/确认删除，保留账号提示与失败输入。首次测试删除后等待了已存在文字，定向修正为等待目标行移除；后来组合因无关六账号表格反复重绘触发15s超时，缩小该测试为无账号列表，保留全部CRUD和HTTP断言、未提高timeout，groups-isolated-green.log 4820ms。 |
+| 补充关键边界 | 新增 HTTP/UI seam 覆盖，不伪造额外生产 red | 显式连接check=true、在线check=false、模拟来源未核验、同步失败保留缓存/creator角色、批移403保留选择/目标与重试；check-sync-green.log 定向项绿。 |
+
+AntD NODE_ENV=test 的 useId 固定为 test-id，使多个 Select 与 Modal aria-labelledby 撞 ID；测试按 dialog 查询，再在其中断言内容，未以生产 hack 绕过。Axios/jsdom/MSW 对 multipart 文件体解析未完成，最初结果断言挂起；改为 unit 只验证配对，浏览器实际 HTTP 上传验证真实 FormData。ApiClient 无手写 Content-Type，当前 Axios 在标准浏览器对 FormData 清除 Content-Type，由浏览器生成 boundary；E2E 将断言实际请求头，不读凭据内容。
+
+布局浏览器：`E2E_BASE_URL=http://127.0.0.1:15173 E2E_BROWSER_CHANNEL=msedge pnpm exec playwright test e2e/accounts-layout.spec.ts`，layout-green.log 1 passed / 5.4s。61条合成 HTTP 展示数据、1366/1920/2560×900，验证 account content 右边界、无页面横溢、内部滚动、分页留在视口内、切页和搜索回页1；截图 accounts-{1366,1920,2560}.png，已看图1366与2560。首次展示路由通配符误拦 Vite 的 src/api/client.ts 模块，范围改为 URL.pathname 以 /api/ 开头后绿；属于测试夹具，不是产品红。后续加分组/状态组合筛选断言，待组合浏览器一起验证。
+
+`pnpm typecheck`（含新增 Node22 SQLite E2E）通过，typecheck-with-e2e.log；最终生产 `pnpm build` 通过，3258 modules，7.64s，build-stable.log；旧 AntD >500kB chunk 提示保留，不扩展优化范围。实际 Telegram/LLM、远端CI与主控最终验收不由这些本地结果证明。

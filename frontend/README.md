@@ -17,7 +17,7 @@ pnpm build
 
 `pnpm test` 只证明 REST/WS 与组件合同。MSW 仅模拟浏览器之外的 HTTP，WS 测试仅替换网络 Socket；两者不能证明 PostgreSQL、网关和 Agent 的完整运行。
 
-`pnpm test:e2e` 使用真实 API，没有 route/mock 拦截。C3 会连接两个 fake 账号、创建群、开启 Agent、向 fake 网关注入一条外部消息，再通过浏览器登录和进入群，核验 Agent 运行步骤。另一个用例验证 viewer 无写按钮且直调写 API 得到 403。B4 用例只在 WebSocket 传输层断线，向真实 fake 网关注入三条消息；恢复后严格三秒内全部可见，第二次实际重连后每条仍只出现一次。仅用于隔离测试数据库，不能指向真实 Telegram 网关。
+`e2e/platform.spec.ts` 和 `e2e/accounts.spec.ts` 使用真实 API，没有 HTTP route/mock 拦截。账号用例用 Node 22 内置 SQLite 在临时目录生成完全合成的 Telethon Session/JSON，完成实际上传、逐项结果、分组与检测/群快照；检测明确为 fake 模拟，结束删除临时文件。`e2e/accounts-layout.spec.ts` 单独使用合成 HTTP 展示夹具，验证 1366/1920/2560 桌面布局、内部滚动和分页；其截图不作为真实业务链证据。C3 会连接两个 fake 账号、创建群、开启 Agent、向 fake 网关注入一条外部消息，再通过浏览器登录和进入群，核验 Agent 运行步骤。另一个用例验证 viewer 无写按钮且直调写 API 得到 403。B4 用例只在 WebSocket 传输层断线，向真实 fake 网关注入三条消息；恢复后严格三秒内全部可见，第二次实际重连后每条仍只出现一次。仅用于隔离测试数据库，不能指向真实 Telegram 网关。
 
 先准备隔离 PostgreSQL 并启动以下进程（root 栈脚本由集成负责人提供）：
 
@@ -34,4 +34,3 @@ pnpm test:e2e
 可设置 `E2E_STACK_COMMAND` 为仓库根目录的栈启动命令；Playwright 会执行它并等待后端 health，然后启动 Vite。未设置则要求后端栈已经启动，不会以 mocks 代替。CI 应由 Rowan 的根脚本提供 PostgreSQL、迁移与三服务。配置支持 `E2E_API_URL`、`E2E_GATEWAY_URL`、`E2E_BASE_URL`。Vite 启动端口与 `E2E_BASE_URL` 的端口一致；独立测试栈同时设置 `VITE_BACKEND_URL` 指向该测试后端，避免使用正在人工验收的服务。本机有 Edge 时可设置 `E2E_BROWSER_CHANNEL=msedge`，CI 使用安装好的 Chromium。
 
 首次交接状态：前端构建与组件测试通过；真实栈 E2E 等待集成栈启动后运行。不会将未启动服务下的失败报告为验收通过。
-
