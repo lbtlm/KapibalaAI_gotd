@@ -1,4 +1,4 @@
-import {render,screen,within} from '@testing-library/react'
+import {fireEvent,render,screen,within} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import {expect,test,vi} from 'vitest'
 import SequenceEditor,{parseSequence} from './SequenceEditor'
@@ -48,9 +48,9 @@ test('AI failure keeps the editable script and reports the cause',async()=>{
 test('visual edits preserve JSON roles and allow replacing a cleared name',async()=>{
  const save=vi.fn();render(<SequenceEditor pending={false} onSave={save}/>)
  const user=userEvent.setup(),name=screen.getByRole('textbox',{name:'剧本名称'})
- await user.clear(name)
+ fireEvent.change(name,{target:{value:''}})
  expect(screen.getByRole('button',{name:'保存剧本'})).toBeDisabled()
- await user.type(name,'Test script')
+ fireEvent.change(name,{target:{value:'Test script'}})
  await user.click(screen.getByRole('button',{name:'添加步骤'}))
  await user.click(screen.getByRole('button',{name:'保存剧本'}))
  expect(save.mock.calls[0][0]).toMatchObject({name:'Test script',steps:[{index:1,accountRole:'admin'},{index:2,accountRole:'member'}]})

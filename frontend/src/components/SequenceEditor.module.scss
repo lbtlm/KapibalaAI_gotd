@@ -9,6 +9,7 @@
 .stepToolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:12px;color:var(--message-muted)}
 .steps{background:var(--message-panel);border:0;border-radius:0}
 .steps :global(.ant-collapse-item){border-bottom:1px solid var(--message-soft-line)}
+.steps :global(.ant-collapse-title),.steps :global(.ant-collapse-header-text){min-width:0}
 .steps :global(.ant-collapse-header){align-items:center!important;padding:12px 8px!important;min-height:48px}
 .steps :global(.ant-collapse-panel){background:var(--message-panel)}
 .steps :global(.ant-collapse-body){padding:4px 8px 16px!important}

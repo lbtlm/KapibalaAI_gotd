@@ -242,3 +242,6 @@ R24 controller: terminal join endpoint red404 then green explicit401/403, reusin
 ## R25 主控：真实模型生成测试剧本
 
 Red：/sequences/generate缺失，chat_completions、responses及未配置拒绝三个场景均404失败。Green：复用provider.model、已有服务端配置及backend request/权限包装；单次模型调用、50秒模型截止，外层60/70/75秒预算分别用于backend/nginx/browser，仅作用于生成端点。模型JSON必须满足步骤数、角色、索引、消息和延迟约束，拒绝截断/无效输出；无API Key明确AI_NOT_CONFIGURED，不回退模板。生成不保存、不执行，用户保存仍走原sequences API，共用domain定义校验以移除重复规则。隔离PostgreSQL集成覆盖匿名401、viewer403、admin生成以及草稿未落库、确认后保存；provider-only HTTP模型边界保留既有测试约定，不模拟Telegram。定向集成、race与vet通过。真实DeepSeek生成另行记录，不能把测试模型响应当作真实验收。
+
+
+R25真实模型：已部署5173页面实际调用现有DeepSeek配置，deepseek-flash在7.896秒返回6步admin/member剧本，采用并保存为“AI 测试 · 周末读书会”。浏览器无运行错误；没有账号检测、群变更或消息发送。部署前后账号/日志/群快照/消息摘要一致，Gateway进程保持运行。证据为忽略目录ui-r25/real-ai-verification.json及页面截图。该结果只证明真实生成与保存，不证明剧本在Telegram执行。
