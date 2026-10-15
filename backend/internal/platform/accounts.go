@@ -102,6 +102,26 @@ func transition(ctx context.Context, tx pgx.Tx, id, from, to string, until *time
 	}
 	return emit(ctx, tx, "account_status_changed", map[string]any{"accountId": id, "from": from, "to": to})
 }
+
+func applyAccountRateLimit(ctx context.Context, tx pgx.Tx, id string, seconds float64) error {
+	var status string
+	var existing *time.Time
+	if e := tx.QueryRow(ctx, `SELECT status,rate_limited_until FROM accounts WHERE id=$1 FOR UPDATE`, id).Scan(&status, &existing); e != nil {
+		return e
+	}
+	until := time.Now().UTC().Add(time.Duration(seconds * float64(time.Second)))
+	if existing != nil && existing.After(until) {
+		until = *existing
+	}
+	if status == "online" {
+		return transition(ctx, tx, id, status, "rate_limited", &until)
+	}
+	if status == "rate_limited" {
+		_, e := tx.Exec(ctx, `UPDATE accounts SET rate_limited_until=$2 WHERE id=$1`, id, until)
+		return e
+	}
+	return nil
+}
 func (a *App) manualTransition(w http.ResponseWriter, r *http.Request) (err error) {
 	action := "transition"
 	defer func() {

@@ -241,16 +241,7 @@ func (a *App) dispatch(ctx context.Context, id, groupID, gatewayID, account, tex
 		case "RATE_LIMITED":
 			var x *externalError
 			errors.As(e, &x)
-			until := time.Now().Add(time.Duration(x.RetryAfterSeconds * float64(time.Second)))
-			var from string
-			if err = tx.QueryRow(ctx, `SELECT status FROM accounts WHERE id=$1 FOR UPDATE`, account).Scan(&from); err != nil {
-				return err
-			}
-			if from == "online" {
-				err = transition(ctx, tx, account, from, "rate_limited", &until)
-			} else if from == "rate_limited" {
-				_, err = tx.Exec(ctx, `UPDATE accounts SET rate_limited_until=$2 WHERE id=$1`, account, until)
-			}
+			err = applyAccountRateLimit(ctx, tx, account, x.RetryAfterSeconds)
 			if err == nil {
 				_, err = tx.Exec(ctx, `UPDATE messages SET delivery_status='queued',dispatch_started_at=NULL WHERE client_msg_id=$1 AND delivery_status='dispatching'`, id)
 			}

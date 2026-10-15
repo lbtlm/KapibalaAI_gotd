@@ -12,7 +12,11 @@ import (
 func accountGatewayError(e error) error {
 	var x *externalError
 	if errors.As(e, &x) {
-		return fail(x.Status, safeAccountCode(e))
+		out := &apiError{status: x.Status, code: safeAccountCode(e), message: safeAccountCode(e)}
+		if x.Code == "RATE_LIMITED" {
+			out.extra = map[string]any{"retryAfterSeconds": x.RetryAfterSeconds}
+		}
+		return out
 	}
 	return e
 }
@@ -98,6 +102,12 @@ func (a *App) checkAccount(w http.ResponseWriter, r *http.Request) (err error) {
 			if e = transition(ctx, tx, id, current.Status, "disconnected", nil); e != nil {
 				return e
 			}
+		} else if externalCode(gatewayErr) == "RATE_LIMITED" {
+			var limit *externalError
+			errors.As(gatewayErr, &limit)
+			if e = applyAccountRateLimit(ctx, tx, id, limit.RetryAfterSeconds); e != nil {
+				return e
+			}
 		}
 		if e = writeAccountLog(ctx, tx, id, actor(ctx), "check", gatewayErr); e != nil {
 			return e
@@ -171,8 +181,9 @@ func (a *App) joinedGroups(w http.ResponseWriter, r *http.Request) error {
 func (a *App) syncJoinedGroups(w http.ResponseWriter, r *http.Request) (err error) {
 	ctx := r.Context()
 	id := r.PathValue("id")
+	logged := false
 	defer func() {
-		if err != nil {
+		if err != nil && !logged {
 			a.recordAccountAttempt(ctx, id, "sync_groups", err)
 		}
 	}()
@@ -194,6 +205,20 @@ func (a *App) syncJoinedGroups(w http.ResponseWriter, r *http.Request) (err erro
 	}
 	v := joinedSnapshot{Items: []joinedGroup{}}
 	if e = a.gateway(ctx, "GET", "/accounts/"+id+"/joined-groups", nil, &v); e != nil {
+		if externalCode(e) == "RATE_LIMITED" {
+			var limit *externalError
+			errors.As(e, &limit)
+			if saveErr := applyAccountRateLimit(ctx, tx, id, limit.RetryAfterSeconds); saveErr != nil {
+				return saveErr
+			}
+			if saveErr := writeAccountLog(ctx, tx, id, actor(ctx), "sync_groups", e); saveErr != nil {
+				return saveErr
+			}
+			if saveErr := tx.Commit(ctx); saveErr != nil {
+				return saveErr
+			}
+			logged = true
+		}
 		return accountGatewayError(e)
 	}
 	if v.Items == nil {
