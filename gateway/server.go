@@ -30,6 +30,7 @@ type APIError struct {
 func (e *APIError) Error() string { return e.Code }
 
 type input struct {
+	GroupID          string   `json:"groupId"`
 	AccountID        string   `json:"accountId"`
 	CreatorAccountID string   `json:"creatorAccountId"`
 	ByAccountID      string   `json:"byAccountId"`

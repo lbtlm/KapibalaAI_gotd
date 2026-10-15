@@ -308,3 +308,9 @@ RED：`go test . -run 'TestCancelledStoreOperationDoesNotRetireHealthyWriter|Tes
 GREEN：最终 `go test -race . -run 'TestCancelledStoreOperationDoesNotRetireHealthyWriter|TestBusyStoreDoesNotRetireHealthyWriter|TestTimedOutDatabaseIOStillRetiresWriter|TestLostPostgresWriterLeaseFailsClosed|TestPostgresOfflineCommandCannotAcquireRunningGatewayLease|TestPostgresDeletedAccountRejectsLateSDKStorageWrites|TestPostgresDeleteCancellationLeavesOtherAccountsAndServiceAvailable|TestPostgresDeleteRollsBackEveryResourceOnStorageFailure|TestPostgresRegistrationSurvivesRestartAndRejectsConcurrentPayload' -count=1` 通过（7.119s），含4种取消操作、真实SQL排队、实际I/O超时、数据库终止持锁连接、重复writer拒绝、删除与重启存储边界。`go vet ./...`通过。均为真实隔离 PostgreSQL + 空账号真实 Gateway，不登录 Telegram；未重跑不受影响的前端与后端测试。本轮按用户要求由主控独立实现和复核。
 
 R30 容器恢复实测：全新空账号 Gateway 与专用隔离库，主动终止该库 writer lease 后记录 service_unavailable、自动重启一次并恢复health；显式stop后保持exited。临时容器/库已清理。首轮测试环境数组格式错误导致未启动，不计恢复失败；修正后上述闭环通过。真实Gateway更新后，后续前端镜像构建和部署期间无退出，观察超过10分钟RestartCount=0。此观察不宣称长期稳定性或证明历史两次退出的唯一触发因素。
+
+## R31 按已同步群 ID 显式登记
+
+Red：原 POST /groups/import 仅接受 username，有效 tg-ID 在账号验证之前直接400。Green：扩展现有导入路径支持 groupId，通过指定账号的 fenced gotd dialogs 查询目标（包含无username的私有超级群），复用 participants/applyMembers；所有选择账号核验完成后再安装群状态，失败不留下半个新群。保留 username 入口，不加入群、不设置管理员、不发送消息。请求继承现有 operationContext 租约隔离。
+
+空账号真实网关+隔离 PostgreSQL：有效群ID到达账号校验并返回404，非法ID返回400；普通和race执行通过，go vet通过。未建立真实 Telegram 连接，不把边界检查当作真实导入成功验收。

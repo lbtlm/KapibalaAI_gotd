@@ -64,7 +64,7 @@ Privately compare Session row counts/digests, state/event cursor and business re
 
 ## Real group operations and recovery
 
-Managed-group import is separate and explicit. POST /groups/import `{username,accountIds[]}` resolves an existing group and records actual membership/roles without joining, promoting or sending. Gateway IDs use tg- followed by channel ID; backend IDs are separate. External creators are preserved.
+Managed-group import is separate and explicit. POST /groups/import `{groupId,accountIds[]}` looks up a joined supergroup in each selected account's dialogs, including private groups. The existing `{username,accountIds[]}` input remains supported. It resolves the existing group and records actual membership/roles without joining, promoting or sending. Gateway IDs use tg- followed by channel ID; backend IDs are separate. External creators are preserved.
 
 Updates are accepted only for registered groups. Account-specific SDK state is separate from SSE history. Missing hashes are repaired from registered metadata; absent/zero pts require bounded exact-ID history before gotd OnStart reports ready. verifiedHistoryThrough records a proven contiguous prefix, not the maximum observed message. Unfinished recovery resumes its committed range, including member-snapshot failures. No simulated convergence deadline is claimed for real outages.
 

@@ -11,7 +11,7 @@ export interface Group { id: string; marketingPaused?:boolean; agentSessionId?:s
 export interface Message { msgId: string | null; clientMsgId: string | null; senderPlatformUserId: string; isOwn: boolean; text: string; sentAt: string; deliveryStatus: string | null; failCode: string | null }
 export interface MessagePage { items: Message[]; nextCursor: string | null }
 export interface AgentStep { kind: string; toolUseId: string | null; name: string | null; input: unknown; resultSummary: string; result?:string; isError: boolean; errorCode: string | null; auditVerdict: string | null; rawResponse: string }
-export interface AgentRun { id: string; groupId: string; adminAccountId?:string; status: string; endReason: string | null; summary: string | null; steps?: AgentStep[] }
+export interface AgentRun { id: string; createdAt?:string; groupId: string; adminAccountId?:string; status: string; endReason: string | null; summary: string | null; steps?: AgentStep[] }
 export interface Sequence { id: string; name: string; steps: { index: number; accountRole: 'admin' | 'member'; text: string; delaySeconds: number }[] }
 export interface SequenceInput { sequenceId: string; vars: Record<string,string>; stepVars: Record<string,Record<string,string>>; memberAccountIds?:string[] }
 export interface PreviewStep { index: number; text: string; accountId?:string|null; accountRole?:'admin'|'member'; delaySeconds?:number; resolvedVars: Record<string,string>; varSources: Record<string,string> }

@@ -2,6 +2,7 @@ import {App} from 'antd'
 import type {ApiError} from '../api/client'
 import {ErrorNotice} from './Feedback'
 const messages:Record<string,string>={
+ GROUP_SNAPSHOT_REQUIRED:'请先同步所选账号的群列表，再选择要导入的群',GROUP_TYPE_UNSUPPORTED:'当前仅支持超级群，请先在 Telegram 升级该普通群',GROUP_ALREADY_IMPORTED:'该群已在群组列表中，请直接进入管理',ACCOUNT_NOT_IN_GROUP:'所选账号已不在群内，请重新同步并检查关联账号',ACCOUNT_NOT_ONLINE:'所选账号未在线，请先连接并检测',SENDER_NOT_IN_GROUP:'所选账号已不在群内，请重新同步',GROUP_NOT_FOUND:'账号无法访问该群，请重新同步确认',
  AUTH_KEY_DUPLICATED:'Telegram 检测到授权重复使用，Session 已失效。请重新登录生成新的 Session 后导入',
  INVALID_GROUP_LINK:'请输入有效的 Telegram 群链接',NOT_A_GROUP:'该链接不是群组',INVITE_EXPIRED:'邀请链接已失效',USERNAME_NOT_OCCUPIED:'群用户名不存在',USERNAME_INVALID:'群用户名格式不正确',CHANNELS_TOO_MUCH:'该账号加入的群或频道已达上限',USERS_TOO_MUCH:'群成员已达上限',USER_BANNED_IN_CHANNEL:'账号被禁止加入该群',GROUP_WRITE_FORBIDDEN:'该群不可访问或不允许操作',NO_PERMISSION:'账号没有执行该操作的权限',
  ACCOUNT_IN_USE:'账号正在执行操作或仍被占用，请稍后重试',ACCOUNT_RETIRED:'账号已移除，请重试删除以完成本系统清理',ACCOUNT_DELETE_INCOMPLETE:'删除尚未完成，请重试删除',NETWORK_TIMEOUT:'请求超时，请稍后重试',

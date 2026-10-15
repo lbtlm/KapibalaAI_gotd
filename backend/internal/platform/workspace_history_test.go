@@ -37,8 +37,8 @@ func TestAgentDetailReturnsStoredToolResultBeyondSummary(t *testing.T) {
 	businessSQL(t, cfg, `INSERT INTO agent_runs(id,group_id,status,history,steps) VALUES('history-run',$1,'finished',$2,'[{"kind":"tool_use","toolUseId":"read-1","name":"get_recent_messages","resultSummary":"short summary"}]')`, group, history)
 	token, _ := login(t, s, "viewer")
 	status, run, _ := call(t, s, "GET", "/api/agent-runs/history-run", token, "")
-	if status != 200 {
-		t.Fatalf("detail=%d", status)
+	if status != 200 || run["createdAt"] == nil {
+		t.Fatalf("detail missing creation time: status=%d", status)
 	}
 	step := run["steps"].([]any)[0].(map[string]any)
 	if step["result"] != full || step["resultSummary"] != "short summary" {

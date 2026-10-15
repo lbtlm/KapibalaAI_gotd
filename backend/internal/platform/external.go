@@ -36,9 +36,9 @@ func (a *App) requestClient(base, method, path string) *http.Client {
 		client.Timeout = 60 * time.Second
 		return &client
 	}
-	if base == a.cfg.GatewayURL && method == http.MethodPost && strings.HasPrefix(path, "/accounts/") && strings.HasSuffix(path, "/connect") {
+	if base == a.cfg.GatewayURL && method == http.MethodPost && (path == "/groups/import" || strings.HasPrefix(path, "/accounts/") && strings.HasSuffix(path, "/connect")) {
 		client := *a.client
-		client.Timeout = 40 * time.Second // Includes the Gateway's 30-second startup deadline.
+		client.Timeout = 40 * time.Second // Connection startup or multi-account import verification.
 		return &client
 	}
 	return a.client

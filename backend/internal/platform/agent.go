@@ -34,6 +34,7 @@ type pendingTool struct {
 }
 type agentRun struct {
 	ID             string               `json:"id"`
+	CreatedAt      time.Time            `json:"createdAt"`
 	GroupID        string               `json:"groupId"`
 	AdminAccountID string               `json:"adminAccountId"`
 	Status         string               `json:"status"`
@@ -50,7 +51,7 @@ type agentRun struct {
 func (a *App) loadAgent(ctx context.Context, id string) (agentRun, error) {
 	var r agentRun
 	var history, steps, pending json.RawMessage
-	e := a.pool.QueryRow(ctx, `SELECT id,group_id,status,end_reason,summary,history,steps,pending,protocol_errors,elapsed_ms+CASE WHEN status='running' THEN GREATEST(0,(extract(epoch FROM (now()-budget_checkpoint))*1000)::bigint) ELSE 0 END,execution_epoch,COALESCE(admin_account_id,'') FROM agent_runs WHERE id=$1`, id).Scan(&r.ID, &r.GroupID, &r.Status, &r.EndReason, &r.Summary, &history, &steps, &pending, &r.ProtocolErrors, &r.ElapsedMS, &r.Epoch, &r.AdminAccountID)
+	e := a.pool.QueryRow(ctx, `SELECT id,group_id,status,end_reason,summary,history,steps,pending,protocol_errors,elapsed_ms+CASE WHEN status='running' THEN GREATEST(0,(extract(epoch FROM (now()-budget_checkpoint))*1000)::bigint) ELSE 0 END,execution_epoch,COALESCE(admin_account_id,''),created_at FROM agent_runs WHERE id=$1`, id).Scan(&r.ID, &r.GroupID, &r.Status, &r.EndReason, &r.Summary, &history, &steps, &pending, &r.ProtocolErrors, &r.ElapsedMS, &r.Epoch, &r.AdminAccountID, &r.CreatedAt)
 	if e == pgx.ErrNoRows {
 		return r, fail(404, "AGENT_RUN_NOT_FOUND")
 	}

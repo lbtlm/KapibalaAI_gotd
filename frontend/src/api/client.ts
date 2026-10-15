@@ -64,7 +64,7 @@ export class ApiClient {
     const sentToken = this.session?.accessToken
     try {
       // A disconnected account check includes connection startup and profile retrieval.
-      const timeout = method === 'POST' && ['/api/sequences/generate','/api/agent/reply-preview'].includes(url) ? 75000 : method === 'POST' && /^\/api\/accounts\/[^/]+\/(check|connect)$/.test(url) ? 60000 : 15000
+      const timeout = method === 'POST' && ['/api/sequences/generate','/api/agent/reply-preview'].includes(url) ? 75000 : method === 'POST' && (url === '/api/groups/import' || /^\/api\/accounts\/[^/]+\/(check|connect)$/.test(url)) ? 60000 : 15000
       const send = () => this.instance.request<T>({ url, method, data, timeout, headers: authenticated && sentToken ? { Authorization: 'Bearer ' + sentToken } : {} })
       const changesCookie = method === 'POST' && ['/api/auth/login', '/api/auth/refresh', '/api/auth/logout'].includes(url)
       const response = await (changesCookie ? this.cookieRequest(generation, send) : send())
