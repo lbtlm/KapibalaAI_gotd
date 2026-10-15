@@ -36,7 +36,7 @@ $env:CONSOLE_PORT='15173'
 node scripts/deploy.mjs .local/candidates/<accepted-sha> kapibala-candidate deploy
 ```
 
-脚本先验证每个文件 checksum 和 40 字符 SHA，加载原镜像，停止该专用项目的旧 backend/provider/gateway，`--no-build` 启动 PostgreSQL、执行显式迁移并启动服务，随后检查通过控制台代理的 `/api/health`。此手动流程有停机窗口；迁移前需完成下述备份。仅健康后将 SHA/mode/time 写入忽略的 `.local/deploy/<project>.json`。健康检查证明进程/代理可用，登录、业务、真实服务仍需对应功能验收。失败保留数据库和现场，操作者查看该 project 日志；没有暗中 reset 或删卷。
+脚本先验证每个文件 checksum 和 40 字符 SHA，加载原镜像，并确认 backend/gateway/frontend 三个预期 SHA 镜像均存在后，才停止该专用项目的旧 backend/provider/gateway。`up` 保留 `--no-build`；显式迁移使用 [`docker compose run --rm --pull never migrate`](https://docs.docker.com/reference/cli/docker/compose/run/)，该子命令不支持 `--no-build`。脚本复用已加载镜像，不执行 build 或 pull，再启动服务并检查通过控制台代理的 `/api/health`。此手动流程有停机窗口；迁移前需完成下述备份。仅健康后将 SHA/mode/time 写入忽略的 `.local/deploy/<project>.json`。健康检查证明进程/代理可用，登录、业务、真实服务仍需对应功能验收。失败保留数据库和现场，操作者查看该 project 日志；没有暗中 reset 或删卷。
 
 ## Rollback and stop
 
