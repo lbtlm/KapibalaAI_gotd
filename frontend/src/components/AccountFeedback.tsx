@@ -1,3 +1,4 @@
+import {App} from 'antd'
 import type {ApiError} from '../api/client'
 import {ErrorNotice} from './Feedback'
 const messages:Record<string,string>={
@@ -9,3 +10,9 @@ const messages:Record<string,string>={
 const deletionReasons:Record<string,string>={active_connection:'账号仍有活动连接，请先离线后再删除',managed_group:'账号仍关联未退出的托管群组，暂时无法删除',pending_message:'账号仍有未完成的消息，暂时无法删除',active_job:'账号仍有运行中的任务，暂时无法删除',active_effect:'账号仍有进行中的操作，暂时无法删除',gateway_in_use:'连接服务仍在使用该账号，请稍后重试删除'}
 export const accountErrorText=(code:string,fallback?:string,reason?:unknown)=>code==='ACCOUNT_IN_USE'&&typeof reason==='string'&&deletionReasons[reason]?deletionReasons[reason]:messages[code]??fallback??'账号操作失败，请稍后重试'
 export function AccountErrorNotice({error}:{error:unknown}){if(!error)return null;const e=error as ApiError;return <ErrorNotice error={{...e,message:accountErrorText(e.code,e.message,e.details?.reason)}}/>}
+
+export function accountErrorMessage(error:unknown){const e=error as ApiError;return accountErrorText(e.code,e.message,e.details?.reason)+(e.code?' · '+e.code:'')}
+export function useAccountMessage(){
+ const {message}=App.useApp()
+ return (error:unknown,label?:string)=>{void message.error({content:(label?label+'：':'')+accountErrorMessage(error),duration:3})}
+}

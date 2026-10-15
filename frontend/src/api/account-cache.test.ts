@@ -19,11 +19,11 @@ test('删除只清目标缓存，剪除列表目标并刷新分组数，保留�
  const cache=new QueryClient()
  try{
   // Ordinary cache keys and IDs, without account profile or platform responses.
-  cache.setQueryData(['accounts'],[{id:'target'},{id:'other'}])
-  const removed=[['account','target'],['account-logs','target','check'],['account-joined-groups','target']]
+  cache.setQueryData(['accounts'],[{id:'target'},{id:'second'},{id:'other'}])
+  const removed=[['account','second'],['account-logs','second'],['account','target'],['account-logs','target','check'],['account-joined-groups','target']]
   const retained=[['account','other'],['account-logs','other'],['account-joined-groups','other'],['groups'],['messages','history']]
   for(const key of [...removed,...retained,['account-groups']])cache.setQueryData(key,'stored-value')
-  await removeAccountState(cache,'target')
+  await removeAccountState(cache,['target','second'])
   expect(cache.getQueryData(['accounts'])).toEqual([{id:'other'}])
   for(const key of removed)expect(cache.getQueryData(key)).toBeUndefined()
   for(const key of retained)expect(cache.getQueryData(key)).toBe('stored-value')

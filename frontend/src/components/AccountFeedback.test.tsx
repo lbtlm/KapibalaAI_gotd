@@ -1,7 +1,8 @@
-import {render,screen} from '@testing-library/react'
-import {expect,test} from 'vitest'
+import {App} from 'antd'
+import {act,fireEvent,render,screen} from '@testing-library/react'
+import {expect,test,vi} from 'vitest'
 import {ApiError} from '../api/client'
-import {AccountErrorNotice} from './AccountFeedback'
+import {AccountErrorNotice,useAccountMessage} from './AccountFeedback'
 
 test.each([
  ['AUTH_KEY_DUPLICATED','Telegram 检测到授权重复使用，Session 已失效。请重新登录生成新的 Session 后导入'],
@@ -23,4 +24,16 @@ test.each([
  render(<AccountErrorNotice error={new ApiError(409,code,code,{reason})}/>)
  expect(screen.getByText(message)).toBeInTheDocument()
  expect(screen.getByText(code,{exact:false})).toBeInTheDocument()
+})
+
+test('操作错误以message显示具体码，3秒后关闭',async()=>{
+ vi.useFakeTimers()
+ function Trigger(){const showError=useAccountMessage();return <button onClick={()=>showError(new ApiError(504,'NETWORK_TIMEOUT',''),'测试账号')}>操作</button>}
+ try{
+  render(<App><Trigger/></App>)
+  fireEvent.click(screen.getByRole('button',{name:'操作'}))
+  expect(screen.getByText('测试账号：请求超时，请稍后重试 · NETWORK_TIMEOUT')).toBeVisible()
+  await act(async()=>{await vi.advanceTimersByTimeAsync(4000)})
+  expect(screen.queryByText(/测试账号：请求超时/)).not.toBeInTheDocument()
+ }finally{vi.useRealTimers()}
 })
