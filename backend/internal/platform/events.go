@@ -164,7 +164,7 @@ func (a *App) processEvent(ctx context.Context, id int64) error {
 				return e
 			}
 			if !own {
-				_, e = tx.Exec(ctx, `INSERT INTO agent_pending(group_id,msg_id) SELECT id,$2 FROM groups WHERE id=$1 AND status='active' AND agent_enabled ON CONFLICT DO NOTHING`, groupID, str("msgId"))
+				_, e = tx.Exec(ctx, `INSERT INTO agent_pending(group_id,msg_id) SELECT id,$2 FROM groups WHERE id=$1 AND status='active' AND agent_enabled AND NOT marketing_paused ON CONFLICT DO NOTHING`, groupID, str("msgId"))
 			}
 		}
 	case "message_failed":

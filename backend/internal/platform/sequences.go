@@ -197,7 +197,8 @@ func (a *App) startSequence(w http.ResponseWriter, r *http.Request) error {
 	}
 	defer tx.Rollback(ctx)
 	var groupStatus string
-	e = tx.QueryRow(ctx, `SELECT status FROM groups WHERE id=$1 FOR UPDATE`, r.PathValue("id")).Scan(&groupStatus)
+	var paused bool
+	e = tx.QueryRow(ctx, `SELECT status,marketing_paused FROM groups WHERE id=$1 FOR UPDATE`, r.PathValue("id")).Scan(&groupStatus, &paused)
 	if e == pgx.ErrNoRows {
 		return fail(404, "GROUP_NOT_FOUND")
 	}
@@ -206,6 +207,9 @@ func (a *App) startSequence(w http.ResponseWriter, r *http.Request) error {
 	}
 	if groupStatus != "active" {
 		return fail(409, "GROUP_UNREACHABLE")
+	}
+	if paused {
+		return fail(409, "MARKETING_PAUSED")
 	}
 	var busy bool
 	if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM jobs WHERE group_id=$1 AND status='running')`, r.PathValue("id")).Scan(&busy); e != nil {

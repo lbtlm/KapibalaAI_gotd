@@ -107,7 +107,7 @@ func (a *App) saveAgent(ctx context.Context, r *agentRun) error {
 	if r.Pending == nil || r.Status != "running" {
 		var enabled bool
 		var status string
-		if e = tx.QueryRow(ctx, `SELECT agent_enabled,status FROM groups WHERE id=$1 FOR SHARE`, r.GroupID).Scan(&enabled, &status); e != nil {
+		if e = tx.QueryRow(ctx, `SELECT agent_enabled AND NOT marketing_paused,status FROM groups WHERE id=$1 FOR SHARE`, r.GroupID).Scan(&enabled, &status); e != nil {
 			return e
 		}
 		if !enabled || status != "active" {
@@ -169,7 +169,7 @@ func (a *App) createAgentRuns(ctx context.Context) {
 		var enabled bool
 		var status string
 		var admin *string
-		e = tx.QueryRow(ctx, `SELECT agent_enabled,status,admin_account_id FROM groups WHERE id=$1 FOR UPDATE`, groupID).Scan(&enabled, &status, &admin)
+		e = tx.QueryRow(ctx, `SELECT agent_enabled AND NOT marketing_paused,status,admin_account_id FROM groups WHERE id=$1 FOR UPDATE`, groupID).Scan(&enabled, &status, &admin)
 		if e != nil {
 			tx.Rollback(ctx)
 			continue
@@ -217,7 +217,17 @@ func (a *App) createAgentRuns(ctx context.Context) {
 			own = append(own, p)
 		}
 		rows.Close()
-		payload, _ := json.Marshal(map[string]any{"groupId": groupID, "triggerMessages": trigger, "policy": map[string]any{"autoKickEnabled": autoKick}, "ownPlatformUserIds": own})
+		conversation, e := a.recentMessages(ctx, groupID, 20)
+		if e != nil {
+			tx.Rollback(ctx)
+			continue
+		}
+		var summary string
+		if e = tx.QueryRow(ctx, `SELECT COALESCE((SELECT summary FROM agent_runs WHERE group_id=$1 AND status='finished' ORDER BY created_at DESC,id DESC LIMIT 1),'')`, groupID).Scan(&summary); e != nil {
+			tx.Rollback(ctx)
+			continue
+		}
+		payload, _ := json.Marshal(map[string]any{"groupId": groupID, "agentSessionId": "group-agent:" + groupID, "conversation": conversation, "previousSummary": truncateRunes(summary, 2000), "triggerMessages": trigger, "policy": map[string]any{"autoKickEnabled": autoKick}, "ownPlatformUserIds": own})
 		id := ID()
 		history := []domain.ChatMessage{{Role: "user", Content: []domain.Block{{Type: "text", Text: string(payload)}}}}
 		if _, e = tx.Exec(ctx, `INSERT INTO agent_runs(id,group_id,history,admin_account_id) VALUES($1,$2,$3,$4)`, id, groupID, history, admin); e == nil {
@@ -298,7 +308,7 @@ func (a *App) executeAgent(ctx context.Context, id string) error {
 	for ctx.Err() == nil && r.Status == "running" {
 		var enabled bool
 		var groupStatus string
-		if e = a.pool.QueryRow(ctx, `SELECT agent_enabled,status FROM groups WHERE id=$1`, r.GroupID).Scan(&enabled, &groupStatus); e != nil {
+		if e = a.pool.QueryRow(ctx, `SELECT agent_enabled AND NOT marketing_paused,status FROM groups WHERE id=$1`, r.GroupID).Scan(&enabled, &groupStatus); e != nil {
 			return e
 		}
 		if r.Pending == nil {
@@ -623,7 +633,7 @@ func (a *App) agentSend(ctx context.Context, r *agentRun, input map[string]any) 
 		return nil, "", e
 	}
 	var account string
-	e = tx.QueryRow(ctx, `SELECT a.id FROM accounts a JOIN members m ON m.account_id=a.id JOIN groups g ON g.id=m.group_id WHERE m.group_id=$1 AND a.id=$2 AND a.status='online' AND m.role IN ('admin','creator') AND g.status='active' AND g.agent_enabled FOR SHARE OF g`, r.GroupID, r.AdminAccountID).Scan(&account)
+	e = tx.QueryRow(ctx, `SELECT a.id FROM accounts a JOIN members m ON m.account_id=a.id JOIN groups g ON g.id=m.group_id WHERE m.group_id=$1 AND a.id=$2 AND a.status='online' AND m.role IN ('admin','creator') AND g.status='active' AND g.agent_enabled AND NOT g.marketing_paused FOR SHARE OF g`, r.GroupID, r.AdminAccountID).Scan(&account)
 	if e == pgx.ErrNoRows {
 		return toolError("ADMIN_UNAVAILABLE"), "ADMIN_UNAVAILABLE", nil
 	}
@@ -668,7 +678,7 @@ func (a *App) agentKick(ctx context.Context, r *agentRun, b domain.Block, input 
 		Key         string `json:"idempotencyKey"`
 	}
 	if state == "" {
-		e = a.pool.QueryRow(ctx, `SELECT a.id FROM accounts a JOIN members m ON m.account_id=a.id JOIN groups g ON g.id=m.group_id WHERE m.group_id=$1 AND a.id=$2 AND a.status='online' AND m.role IN ('creator','admin') AND g.status='active' AND g.agent_enabled`, r.GroupID, r.AdminAccountID).Scan(&intent.ByAccountID)
+		e = a.pool.QueryRow(ctx, `SELECT a.id FROM accounts a JOIN members m ON m.account_id=a.id JOIN groups g ON g.id=m.group_id WHERE m.group_id=$1 AND a.id=$2 AND a.status='online' AND m.role IN ('creator','admin') AND g.status='active' AND g.agent_enabled AND NOT g.marketing_paused`, r.GroupID, r.AdminAccountID).Scan(&intent.ByAccountID)
 		if e == pgx.ErrNoRows {
 			return toolError("ADMIN_UNAVAILABLE"), "ADMIN_UNAVAILABLE", nil
 		}
@@ -686,7 +696,7 @@ func (a *App) agentKick(ctx context.Context, r *agentRun, b domain.Block, input 
 			return nil, "", e
 		}
 		var enabled bool
-		if e = tx.QueryRow(ctx, `SELECT agent_enabled AND status='active' FROM groups WHERE id=$1 FOR SHARE`, r.GroupID).Scan(&enabled); e != nil {
+		if e = tx.QueryRow(ctx, `SELECT agent_enabled AND NOT marketing_paused AND status='active' FROM groups WHERE id=$1 FOR SHARE`, r.GroupID).Scan(&enabled); e != nil {
 			return nil, "", e
 		}
 		if !enabled {

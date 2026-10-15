@@ -250,3 +250,13 @@ R25真实模型：已部署5173页面实际调用现有DeepSeek配置，deepseek
 ## R26 主控：导入资料回填
 
 Red：资料解析标准化、别名与数字手机号三个场景失败。Green：优先 JSON phone/phone_number/phoneNumber，缺少有效手机号时从配对文件名提取；读取 username/user_name、first_name/firstName、last_name/lastName，清理首尾空白及用户名 @ 前缀。文件名不能把任意标签、短编号或超长 ID 当作手机号。资料仍通过既有 INSERT 存储，默认未核验；既有 checkAccount 成功才使用 Telegram 权威资料替换，失败不抹除导入值。无数据库迁移或新的生命周期管理器。纯解析测试通过；隔离 PostgreSQL 占用拒绝与删除失败保留数据检查通过。后者旧断言仍期待 NETWORK_TIMEOUT，已与先前已修正的连接拒绝语义 503 GATEWAY_UNAVAILABLE 对齐。没有读取或上传真实 Session，没有连接 Telegram。
+
+## R27 主控：真实 AI 预演、群会话及暂停恢复
+
+Red：新增模型回复预演 HTTP 测试首先得到404；暂停接口权限用例得到404；跨消息会话用例确认新run缺少持久群身份/上一摘要。Green：provider模型边界、无效/截断输出、缺配置拒绝、平台admin/viewer权限及真实隔离PostgreSQL无message/agent_run/agent_effect写入通过。复用既有生成传输，不新增模型客户端；生成失败保持AI_INVALID_SCRIPT / AI_INVALID_REPLY的准确错误码。
+
+暂停/恢复使用隔离数据库业务输入验证：群及3个成员保留，Agent启用偏好保留，取消旧剧本与自动queued消息但保留手动queued消息，暂停时拒绝启动剧本，恢复后同剧本可重新运行；cancelled旧任务的迟到queued消息不会重发。slow-final end_turn/finish在暂停中取消，旧AI请求未确认前恢复409，确认后恢复200。实际App关闭并重新构建后，新消息仍使用同一个agentSessionId、持久近期对话及上一成功摘要。既有12次预算、重复tool-id、外部触发筛选、管理员锁定、剧本预检及结束营销定向回归通过。
+
+命令：`go test ./internal/provider -run 'Test(ReplyPreview|SequenceGeneration|ChatProvider)' -count=1`；`go test ./internal/platform -run 'Test(PauseMarketing|GroupAgentSession|SlowFinalTurn)' -count=1`；`go test ./internal/platform -run 'Test(CancelledCampaign|Agent|DuplicateTool|SequencePreflight|ScriptPreview|EndMarketing|OwnedMessages|GroupAdministrator)' -count=1`。均使用独立inspection数据库，不使用现场Session，不模拟Gateway成功。
+
+真实DeepSeek协议测试 `TestLiveProviderToolConversationAndAudit` 完成读取工具→finish与pass审计；合成内容且不连接Telegram。预演接口与此协议证据分别验证，不等同真实群发送或退群验收。主控按用户明确要求独立检查暂停准入、在途确认、恢复互斥、锁顺序及既有单run约束，没有委派独立reviewer。

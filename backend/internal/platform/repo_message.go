@@ -201,6 +201,21 @@ func (a *App) sendOne(ctx context.Context, account string) error {
 	if status != "online" {
 		return nil
 	}
+	// A retry can requeue an already dispatched automation message after pause.
+	// Keep manual sends available; never dispatch cancelled campaign work anew.
+	stopped, e := automationStopped(ctx, tx, groupID, id)
+	if e != nil {
+		return e
+	}
+	if stopped {
+		if _, e = tx.Exec(ctx, `UPDATE messages SET delivery_status='cancelled',fail_code='MARKETING_STOPPED' WHERE client_msg_id=$1`, id); e != nil {
+			return e
+		}
+		if e = emit(ctx, tx, "message", map[string]any{"groupId": groupID, "clientMsgId": id, "isOwn": true}); e != nil {
+			return e
+		}
+		return tx.Commit(ctx)
+	}
 	now := time.Now()
 	_, e = tx.Exec(ctx, `UPDATE messages SET delivery_status='dispatching',dispatch_started_at=$2,reconcile_after=$2::timestamptz+interval '14 seconds' WHERE client_msg_id=$1`, id, now)
 	if e != nil {
@@ -302,6 +317,19 @@ func (a *App) reconcileMessage(ctx context.Context, id, groupID, gatewayID, acco
 	if current == "sent" || current == "failed" || current == "cancelled" {
 		return nil
 	}
+	stopped, e := automationStopped(ctx, tx, groupID, id)
+	if e != nil {
+		return e
+	}
+	if stopped {
+		if _, e = tx.Exec(ctx, `UPDATE messages SET delivery_status='cancelled',fail_code='MARKETING_STOPPED' WHERE client_msg_id=$1`, id); e != nil {
+			return e
+		}
+		if e = emit(ctx, tx, "message", map[string]any{"groupId": groupID, "clientMsgId": id, "isOwn": true}); e != nil {
+			return e
+		}
+		return tx.Commit(ctx)
+	}
 	if retries >= 1 || accountStatus != "online" || groupStatus != "active" {
 		code := "NETWORK_TIMEOUT"
 		if accountStatus == "suspended" || accountStatus == "session_expired" {
@@ -376,4 +404,11 @@ func unreachable(ctx context.Context, tx pgx.Tx, groupID string) error {
 		}
 	}
 	return nil
+}
+
+// Called only before a new dispatch/retry; reconciliation of accepted work still runs.
+func automationStopped(ctx context.Context, tx pgx.Tx, groupID, id string) (bool, error) {
+	var stopped bool
+	e := tx.QueryRow(ctx, `SELECT ((g.marketing_paused OR g.status!='active') AND (EXISTS(SELECT 1 FROM sequence_steps s WHERE s.client_msg_id=$2) OR EXISTS(SELECT 1 FROM agent_effects e WHERE e.client_msg_id=$2))) OR EXISTS(SELECT 1 FROM sequence_steps s JOIN sequence_runs r ON r.id=s.run_id WHERE s.client_msg_id=$2 AND r.status='cancelled') OR EXISTS(SELECT 1 FROM agent_effects e JOIN agent_runs r ON r.id=e.run_id WHERE e.client_msg_id=$2 AND r.status='cancelled') FROM groups g WHERE g.id=$1`, groupID, id).Scan(&stopped)
+	return stopped, e
 }

@@ -17,22 +17,26 @@ func (a *App) generateSequence(w http.ResponseWriter, r *http.Request) error {
 	}
 	var result domain.SequenceGenerationResult
 	if e := a.request(r.Context(), a.cfg.AgentURL, "POST", "/sequences/generate", input, &result); e != nil {
-		var external *externalError
-		if errors.As(e, &external) {
-			switch external.Code {
-			case "AI_NOT_CONFIGURED":
-				return fail(503, external.Code)
-			case "AI_INVALID_SCRIPT":
-				return fail(502, external.Code)
-			case "AI_TIMEOUT", "NETWORK_TIMEOUT":
-				return fail(504, "AI_TIMEOUT")
-			}
-		}
-		return fail(502, "AI_PROVIDER_ERROR")
+		return generationError(e)
 	}
 	if !result.Sequence.Valid() || len(result.Sequence.Steps) != input.StepCount || result.Model == "" {
 		return fail(502, "AI_INVALID_SCRIPT")
 	}
 	respond(w, 200, result)
 	return nil
+}
+
+func generationError(e error) error {
+	var external *externalError
+	if errors.As(e, &external) {
+		switch external.Code {
+		case "AI_NOT_CONFIGURED":
+			return fail(503, external.Code)
+		case "AI_INVALID_SCRIPT", "AI_INVALID_REPLY":
+			return fail(502, external.Code)
+		case "AI_TIMEOUT", "NETWORK_TIMEOUT":
+			return fail(504, "AI_TIMEOUT")
+		}
+	}
+	return fail(502, "AI_PROVIDER_ERROR")
 }

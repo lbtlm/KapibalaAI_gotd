@@ -80,3 +80,11 @@ Frontend F2 visual direction was explicitly accepted by the user. Remaining auth
 ## Account inspection batch (approved 2026-10-15)
 
 The next approved work is specified in [the account inspection contract](account-inspection-20261015.md), tracked by issue #4 and PR #5 on `fix/account-inspection-20261015` from `dc0db77`. It extends seeded-only accounts with paired Session/JSON imports, profile checks, joined-group discovery, logs and single-group organization, while retaining A1 and the existing sole TelegramAdapter lifecycle. The shared API section there governs these additive endpoints. Niko/Orion/Iris retain their existing module ownership and execution settings; the controller owns the user-selected Astra/Ultra/Fast setting. Source references are read-only. Component tests use separate inspection databases on the existing isolated PostgreSQL port 55433; the user demo at 5173 is not a component test target. Dynamic import/lifecycle/persistence changes require independent stable-snapshot review and combined acceptance before readiness.
+
+## R27 主控：群工作区、真实 AI 与营销暂停（2026-10-15）
+
+用户补充明确暂停与彻底结束的差异，继续沿用 #4 / #5，由主控独立实现。群级 Agent 身份由持久 group ID 确定，绑定持久管理员；每次新外部消息仍启动一个有预算的处理 run，同群最多一个。每次处理显式加载已有 recentMessages 的有界上下文（最多20条、8KiB）及上一成功处理摘要（最多2000字符），跨服务重启恢复。不是取消单次run预算、无限保留请求，或向模型回放私有推理。
+
+POST /api/groups/{id}/marketing/pause|resume 仅管理员可用。暂停持久保存 marketing_paused，保留群/成员/剧本配置和 Agent 启用偏好，取消本次剧本、待触发消息及尚未发出的自动消息；手动发送与群管理保留。旧在途请求继续确认，恢复在 Agent/自动消息/移除成员结果未确定时返回 MARKETING_DRAINING。恢复使原 Agent 待命；同一剧本由用户预览确认后重新从第1步运行。取消任务的迟到重试不能重新发送。彻底结束继续使用既有 leave-all / B2 drain 与依次退群流程。暂停、恢复日志复用 jobs.logs。
+
+GET /api/agent/status 暴露运行模式、模型名、是否配置，不暴露密钥。POST /api/agent/reply-preview 为管理员提供真实模型的无工具模拟回复，复用现有生成协议与分层超时；无消息、run或发送意图入库。用户明确批准本机已启用群的自动回复切换为 AGENT_MODE=openai，使用既有私有 DeepSeek 配置；无固定文案回退。正式自动回复继续经过既有工具执行、审计和管理员身份约束。

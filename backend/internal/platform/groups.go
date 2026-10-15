@@ -35,11 +35,13 @@ type group struct {
 	ActiveSequenceRunID *string         `json:"activeSequenceRunId"`
 	ActiveAgentRunID    *string         `json:"activeAgentRunId"`
 	ActiveJobID         *string         `json:"activeJobId"`
+	MarketingPaused     bool            `json:"marketingPaused"`
+	AgentSessionID      string          `json:"agentSessionId"`
 }
 
 func (a *App) readGroup(ctx context.Context, id string) (group, error) {
 	var g group
-	e := a.pool.QueryRow(ctx, `SELECT id,gateway_group_id,status,COALESCE(creator_account_id,''),agent_enabled,auto_kick_enabled,(SELECT id FROM sequence_runs WHERE group_id=groups.id AND status='running'),(SELECT id FROM agent_runs WHERE group_id=groups.id AND status='running'),title,admin_account_id,sequence_config,username,invite_link FROM groups WHERE id=$1`, id).Scan(&g.ID, &g.GatewayGroupID, &g.Status, &g.CreatorAccountID, &g.AgentEnabled, &g.AutoKickEnabled, &g.ActiveSequenceRunID, &g.ActiveAgentRunID, &g.Title, &g.AdminAccountID, &g.SequenceConfig, &g.Username, &g.InviteLink)
+	e := a.pool.QueryRow(ctx, `SELECT id,gateway_group_id,status,COALESCE(creator_account_id,''),agent_enabled,auto_kick_enabled,(SELECT id FROM sequence_runs WHERE group_id=groups.id AND status='running'),(SELECT id FROM agent_runs WHERE group_id=groups.id AND status='running'),title,admin_account_id,sequence_config,username,invite_link,marketing_paused FROM groups WHERE id=$1`, id).Scan(&g.ID, &g.GatewayGroupID, &g.Status, &g.CreatorAccountID, &g.AgentEnabled, &g.AutoKickEnabled, &g.ActiveSequenceRunID, &g.ActiveAgentRunID, &g.Title, &g.AdminAccountID, &g.SequenceConfig, &g.Username, &g.InviteLink, &g.MarketingPaused)
 	if e == pgx.ErrNoRows {
 		return g, fail(404, "GROUP_NOT_FOUND")
 	}
@@ -50,6 +52,7 @@ func (a *App) readGroup(ctx context.Context, id string) (group, error) {
 		return g, e
 	}
 	g.Members = []member{}
+	g.AgentSessionID = "group-agent:" + g.ID
 	rows, e := a.pool.Query(ctx, `SELECT account_id,platform_user_id,role FROM members WHERE group_id=$1 ORDER BY role,platform_user_id`, id)
 	if e != nil {
 		return g, e

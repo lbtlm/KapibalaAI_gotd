@@ -193,6 +193,9 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("POST /api/groups/{id}/sequence-runs", a.wrap(a.startSequence, false))
 	m.HandleFunc("POST /api/groups/{id}/sequence-runs/preview", a.wrap(a.previewSequence, false))
 	m.HandleFunc("GET /api/sequence-runs/{id}", a.wrap(a.sequenceRun, false))
+	m.HandleFunc("GET /api/agent/status", a.wrap(a.agentStatus, false))
+	m.HandleFunc("POST /api/groups/{id}/marketing/{action}", a.wrap(a.marketing, false))
+	m.HandleFunc("POST /api/agent/reply-preview", a.wrap(a.previewAgentReply, false))
 	m.HandleFunc("GET /api/agent-runs/{id}", a.wrap(a.agentGet, false))
 	m.HandleFunc("GET /api/groups/{id}/agent-runs", a.wrap(a.agentList, false))
 	return m

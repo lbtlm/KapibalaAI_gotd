@@ -31,7 +31,7 @@ func (a *App) gateway(ctx context.Context, method, path string, input, output an
 	return a.request(ctx, a.cfg.GatewayURL, method, path, input, output)
 }
 func (a *App) requestClient(base, method, path string) *http.Client {
-	if base == a.cfg.AgentURL && method == http.MethodPost && path == "/sequences/generate" {
+	if base == a.cfg.AgentURL && method == http.MethodPost && (path == "/sequences/generate" || path == "/agent/reply-preview") {
 		client := *a.client
 		client.Timeout = 60 * time.Second
 		return &client

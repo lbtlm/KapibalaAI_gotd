@@ -64,7 +64,7 @@ services:
       DATABASE_URL: postgres://kapibala:${POSTGRES_PASSWORD}@postgres:5432/kapibala?sslmode=disable
       BIND_HOST: 0.0.0.0
       PORT: 8082
-      AGENT_MODE: scripted
+      AGENT_MODE: ${AGENT_MODE:-scripted}
       AGENT_ADMIN_ENABLED: 'false'
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-flash}
