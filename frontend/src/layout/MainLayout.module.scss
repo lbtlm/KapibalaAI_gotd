@@ -18,6 +18,12 @@
 :global(.ant-alert-success),:global(.ant-alert-info){background:var(--message-input);border-color:var(--message-line)}
 :global(.ant-table-cell){vertical-align:middle}
 .layoutContainer{min-height:100dvh}
+.layoutWorkspace{height:100dvh;min-height:0;overflow:hidden}
+.layoutWorkspace .mainLayout{min-height:0}
+.layoutWorkspace .header{flex:none}
+.layoutWorkspace .contentWorkspace{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding-bottom:16px}
+.groupPage{flex:1;min-height:0;display:flex;flex-direction:column}
+.groupPage>.pageHeading,.groupPage>.externalNotice{flex:none}
 .sider{background:var(--message-paper)!important;border-right:1px solid var(--message-line)}
 .sidebarInner{position:sticky;top:0;height:100dvh;display:flex;flex-direction:column;padding:16px 8px}
 .logo{padding:0 12px 24px;display:flex;align-items:baseline;gap:8px;font-size:18px;font-weight:700;letter-spacing:-.5px}
@@ -68,15 +74,15 @@
 .statusInfo{background:var(--message-selected)!important;color:var(--message-signal)!important}
 .statusWarning{background:var(--message-warning-paper)!important;color:var(--message-warning)!important}
 .statusDanger{background:var(--message-danger-paper)!important;color:var(--message-danger)!important}
-.groupGrid{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:24px;align-items:start}
-.chatArea{border:1px solid var(--message-line);border-radius:4px;overflow:hidden;display:flex;flex-direction:column;height:calc(100dvh - 250px);min-height:560px;min-width:0}
+.groupGrid{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:24px;align-items:stretch;flex:1;min-height:0;grid-template-rows:minmax(0,1fr)}
+.chatArea{border:1px solid var(--message-line);border-radius:4px;overflow:hidden;display:flex;flex-direction:column;height:100%;min-height:0;min-width:0}
 .groupTabs{flex:1;min-height:0}
 .groupTabs>:global(.ant-tabs-nav){flex:none;margin:0;padding:0 16px;background:var(--message-panel)}
 .groupTabs :global(.ant-tabs-body-holder){flex:1;min-height:0;overflow:hidden}
 .groupTabs :global(.ant-tabs-body){height:100%}
 .groupTabs :global(.ant-tabs-content){height:100%;overflow:auto}
 .chatPanel{display:flex;flex-direction:column;height:100%;min-height:0}
-.chatPanel>.timeline{flex:1;min-height:120px}
+.chatPanel>.timeline{flex:1;min-height:0}
 .chatPanel>.composer,.chatPanel>.chatHeading{flex:none}
 .externalNotice{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:6px 12px;margin-bottom:12px;border:1px solid #dce8f2;border-radius:4px;background:#f2f7fb;color:var(--message-signal);font-size:13px}
 .externalNotice strong{font-weight:500}
@@ -112,7 +118,7 @@
 .composeAccount :global(.ant-form-item-label),.composeText :global(.ant-form-item-label){padding-bottom:4px}
 .composeText :global(.ant-form-item){margin:0}
 .composeText :global(textarea){min-height:64px}
-.diagnostics{border-left:1px solid var(--message-line);padding-left:20px;height:calc(100dvh - 250px);min-height:560px;display:flex;flex-direction:column;gap:16px;overflow:auto}
+.diagnostics{border-left:1px solid var(--message-line);padding-left:20px;height:100%;min-height:0;display:flex;flex-direction:column;gap:16px;overflow:auto}
 .sideControls{flex:none}
 .sideControls .sideSection{margin:0;padding:0 0 16px}
 .memberSection{min-height:120px;max-height:240px;overflow:auto;flex:1}
@@ -181,8 +187,8 @@
 @media(max-width:900px){
  .content{padding:16px}
  .header{padding:0 16px}
- .groupGrid{grid-template-columns:minmax(0,1fr)}
- .diagnostics{border-left:0;padding-left:0}
+ .groupGrid{grid-template-columns:minmax(0,1fr) 240px;gap:16px}
+ .diagnostics{padding-left:12px}
  .pageHeading{gap:12px;flex-wrap:wrap}
 }
 
