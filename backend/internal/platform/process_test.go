@@ -18,7 +18,7 @@ func TestServerProcessHelper(t *testing.T) {
 	if os.Getenv("KAPIBALA_CHILD_SERVER") != "true" {
 		t.Skip("subprocess helper")
 	}
-	cfg := platform.Config{DatabaseURL: os.Getenv("KAPIBALA_CHILD_DSN"), GatewayURL: os.Getenv("KAPIBALA_CHILD_GATEWAY"), AgentURL: os.Getenv("KAPIBALA_CHILD_AGENT")}
+	cfg := platform.Config{DatabaseURL: os.Getenv("KAPIBALA_CHILD_DSN"), GatewayURL: os.Getenv("KAPIBALA_CHILD_GATEWAY"), AgentURL: os.Getenv("KAPIBALA_CHILD_AGENT"), MediaDir: os.Getenv("KAPIBALA_CHILD_MEDIA")}
 	a, e := platform.New(context.Background(), cfg)
 	if e != nil {
 		t.Fatal(e)
@@ -40,7 +40,7 @@ func TestServerProcessHelper(t *testing.T) {
 func childServer(t *testing.T, cfg platform.Config) (*exec.Cmd, *httptest.Server) {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestServerProcessHelper$", "-test.timeout=5m")
-	cmd.Env = append(os.Environ(), "KAPIBALA_CHILD_SERVER=true", "KAPIBALA_CHILD_DSN="+cfg.DatabaseURL, "KAPIBALA_CHILD_GATEWAY="+cfg.GatewayURL, "KAPIBALA_CHILD_AGENT="+cfg.AgentURL)
+	cmd.Env = append(os.Environ(), "KAPIBALA_CHILD_SERVER=true", "KAPIBALA_CHILD_DSN="+cfg.DatabaseURL, "KAPIBALA_CHILD_GATEWAY="+cfg.GatewayURL, "KAPIBALA_CHILD_AGENT="+cfg.AgentURL, "KAPIBALA_CHILD_MEDIA="+cfg.MediaDir)
 	out, e := cmd.StdoutPipe()
 	if e != nil {
 		t.Fatal(e)

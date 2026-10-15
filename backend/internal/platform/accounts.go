@@ -132,6 +132,40 @@ func applyAccountRateLimit(ctx context.Context, tx pgx.Tx, id string, seconds fl
 	}
 	return nil
 }
+
+// Expiry belongs to account lifecycle, including when its send queue is empty.
+// Row locks prevent another instance or a manual transition from being overwritten.
+func (a *App) expireRateLimits(ctx context.Context) error {
+	tx, e := a.pool.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
+	rows, e := tx.Query(ctx, `SELECT id FROM accounts WHERE status='rate_limited' AND rate_limited_until<=now() ORDER BY id FOR UPDATE SKIP LOCKED`)
+	if e != nil {
+		return e
+	}
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if e = rows.Scan(&id); e != nil {
+			rows.Close()
+			return e
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if e = rows.Err(); e != nil {
+		return e
+	}
+	for _, id := range ids {
+		if e = transition(ctx, tx, id, "rate_limited", "online", nil); e != nil {
+			return e
+		}
+	}
+	return tx.Commit(ctx)
+}
+
 func (a *App) manualTransition(w http.ResponseWriter, r *http.Request) (err error) {
 	action := "transition"
 	defer func() {

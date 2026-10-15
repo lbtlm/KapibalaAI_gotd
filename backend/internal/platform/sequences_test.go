@@ -16,8 +16,13 @@ func TestSequencePreflightRejectsWithoutRunningAndConcurrentStartHasOneWinner(t 
 	}
 	seq := b["id"].(string)
 	st, b, _ = call(t, s, "POST", "/api/groups/"+group+"/sequence-runs", token, `{"sequenceId":"`+seq+`","vars":{"event":"hello"}}`)
-	if st != 422 || b["error"].(map[string]any)["stepIndex"] != float64(3) {
+	if st != 422 || b["error"].(map[string]any)["stepIndex"] != float64(3) || b["error"].(map[string]any)["code"] != "UNRESOLVED_PLACEHOLDER" || b["error"].(map[string]any)["key"] != "missing" {
 		t.Fatalf("preflight %d %v", st, b)
+	}
+	_, detail, _ := call(t, s, "GET", "/api/groups/"+group, token, "")
+	_, timeline, _ := call(t, s, "GET", "/api/groups/"+group+"/messages", token, "")
+	if detail["activeSequenceRunId"] != nil || len(timeline["items"].([]any)) != 0 {
+		t.Fatal("failed preflight left an active run or outgoing message")
 	}
 	var wg sync.WaitGroup
 	statuses := make(chan int, 2)
@@ -25,7 +30,10 @@ func TestSequencePreflightRejectsWithoutRunningAndConcurrentStartHasOneWinner(t 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			st, _, _ := call(t, s, "POST", "/api/groups/"+group+"/sequence-runs", token, `{"sequenceId":"`+seq+`","vars":{"event":"hello","missing":"done"}}`)
+			st, body, _ := call(t, s, "POST", "/api/groups/"+group+"/sequence-runs", token, `{"sequenceId":"`+seq+`","vars":{"event":"hello","missing":"done"}}`)
+			if st == 409 && body["error"].(map[string]any)["code"] != "SEQUENCE_ALREADY_RUNNING" {
+				t.Errorf("concurrent sequence start returned wrong error: %v", body)
+			}
 			statuses <- st
 		}()
 	}

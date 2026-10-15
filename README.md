@@ -113,7 +113,7 @@ pnpm --dir frontend test:e2e
 
 已有服务会在本地被 Playwright 复用；最终验收应停止旧候选并启动待验收版本。CI 每次使用全新 PostgreSQL 和自身服务。真实 Telegram、真实 LLM 与人工界面验收分别记录，空系统/单元/CI 通过不代表这些外部验收通过。旧模拟故障用例已按用户要求移除，其历史结果不作为当前真实故障覆盖。
 
-需求、真实验收与限制见 [验收矩阵](docs/验收矩阵.md)，协作状态见 [development-status.md](docs/development-status.md)，各组件 TDD/reuse 文档见 `docs/tdd-*.md`、`docs/reuse-*.md`。C1 已实现图片、音视频、文件与 WebP/TGS/WebM 贴纸下载显示；媒体持久化在独立卷，默认保留30天，运行中的群 Agent 会保护文件。单文件上限64MiB，超限明确提示；失败可重试。C3 只读已有群测试和面试 API 对照见 [流程覆盖表](docs/api-flow-coverage.md)。真实 Telegram 的服务器原时间戳为秒，真实平台无法保证规范中的两秒故障收敛，未知外部效果会保持待核实而不盲目重复。
+当前未完成/未验证要求与关键异常证据见 [要求审计](docs/requirements-audit.md)，历史验收记录见 [验收矩阵](docs/验收矩阵.md)，协作状态见 [development-status.md](docs/development-status.md)，各组件 TDD/reuse 文档见 `docs/tdd-*.md`、`docs/reuse-*.md`。C1 已实现图片、音视频、文件与 WebP/TGS/WebM 贴纸下载显示；媒体持久化在独立卷，默认保留30天，运行中的群 Agent 会保护文件。单文件上限64MiB，超限明确提示；失败可重试。C3 只读已有群测试和面试 API 对照见 [流程覆盖表](docs/api-flow-coverage.md)。真实 Telegram 的服务器原时间戳为秒，真实平台无法保证规范中的两秒故障收敛，未知外部效果会保持待核实而不盲目重复。
 
 开发分支全部 PR 到 `dev`，执行 **light**：策略/脚本测试、Go domain 纯单元测试、前端 unit/typecheck，不做前端构建、PG/race、E2E 或镜像构建；明确纯文档 PR 使用 **docs**，仅策略/脚本测试与 Gate。验收后的同仓 `dev` → `main` 发布 PR 执行 **full**，包括 Go/PostgreSQL/race/vet、前端 build、真实空系统 E2E、同批镜像冒烟与 SHA256 原制品。普通 dev/main push 不重复跑 CI；显式手动 full 为可选重验。
 

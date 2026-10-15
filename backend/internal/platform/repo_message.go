@@ -172,6 +172,9 @@ func (a *App) messages(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 func (a *App) sendTick(ctx context.Context) {
+	if e := a.expireRateLimits(ctx); e != nil {
+		return
+	}
 	// Reserve workers only for actionable account FIFO heads. Idle accounts and
 	// future retries must not consume the bounded send pool.
 	for _, id := range a.ids(ctx, `SELECT a.id FROM accounts a JOIN LATERAL (

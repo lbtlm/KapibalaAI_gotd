@@ -287,3 +287,13 @@ Red: `TestMediaEventSurvivesIngestionWithoutBlockingText` 在真实PG中导入�
 定向 `go test -race ./internal/platform -run Test(Media|RepeatedMigration|ServerExecutable) -count=1` 通过，vet通过；schema12重复迁移不重置数据，旧schema11启动被拒绝。主控按用户要求独立复核群行锁与Agent创建互斥、先清引用后删除、恢复重试和认证边界。
 
 R32现场只读验证：schema12迁移完成，当前Telegram群历史TGS贴纸（8244字节）和MP4（169847字节）真实下载成功；随后同群新收到的MP4也完成下载。浏览器TGS生成SVG动画，两个视频均解码为720×540、时长约1.84秒；1366×900、800×768、640×768无外层滚动溢出，pageerror=0、业务写请求=0。C3更新后再次1 passed。现场内容/截图只在ignored ui-r32，不进入Git。
+
+## R33 主控：要求查漏与关键异常测试
+
+Red：`TestRateLimitExpiresWithoutQueuedMessagesAcrossInstances` 在真实PG中等待2秒后账号仍为rate_limited；恢复原先只发生于sendOne拿到排队消息之后。Green：在既有sendTick处理到期账号，复用transition事务与WS事件；FOR UPDATE SKIP LOCKED防止多实例/人工状态覆盖，无新表/worker/API。相同用例通过，并验证未来截止时间不提前恢复、已离线/终态不改变、双实例仅一条状态事件。
+
+新增15个叶子场景：审计8种不明确结果（500、非法JSON、围栏、尾随文字、缺失verdict、非法值、null、真实10秒超时×3）；明确拒绝后同key重新审计；审计第二次请求期间真实强杀/重建后累计仅3次且同runId；unknown发送同key不再审计/入队；同群双实例串行与待处理消息有序合批；inbox事务失败/inconsistency/重启/重复消息/离线own；不可用端口下unknown超过5秒后仍保留、重建后迟到回执合并。加强CAS_CONFLICT、SEQUENCE_ALREADY_RUNNING、预检422的stepIndex/key与无副作用断言。
+
+执行证据：19个叶子场景定向race通过，无race报告；其中主批12个顶层测试（含7个审计子例）71.797秒，追加同key测试9.181秒。实际审计超时与强杀两例普通模式32.923秒通过，超时场景不在race重复等待；vet ./internal/platform通过。没有重跑网关/媒体/前端/真实平台及全量测试。正确实现补覆盖首次即绿，不捏造红阶段。
+
+首个沙箱PG连接失败属于环境失败，升级本地测试执行权限后通过。第一次强杀测试在测试HTTP服务关闭时因未读取请求体阻塞，定点停止该测试进程，补齐请求体读取后复测通过；未修改产品审计逻辑以规避测试。子进程helper传递fixture临时media目录。全部使用隔离schema及Agent协议HTTP服务，无网关模拟成功、真实账号或真实模型请求。完整剩余边界见 [要求审计](requirements-audit.md)。
