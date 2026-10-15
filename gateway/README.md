@@ -2,6 +2,19 @@
 
 Go 1.24 gateway for the section 2.1 HTTP/SSE contract, using pinned gotd v0.112.0 and PostgreSQL. New databases contain no accounts. Upload a real Telethon SQLite `.session` plus JSON API metadata through the application. Import persists credentials without connecting; an explicit connection and Self check establish actual identity.
 
+## Package layout
+
+`gateway/` is one Go module. Its root source files share `package gateway`; the executable entry points are in `cmd/gateway`, `cmd/adopt` and `cmd/probe`. Tests stay beside the behavior they cover.
+
+| Files | Responsibility |
+| --- | --- |
+| `server.go`, `account_*.go`, `groups.go` | HTTP endpoints and account/group operations |
+| `telegram*.go`, `session.go`, `media.go` | gotd connections, Session conversion, platform operations and media |
+| `postgres.go`, `store.go`, `update_storage.go` | PostgreSQL persistence and writer ownership |
+| `events.go`, `update_pipeline.go`, `*_recovery.go` | Event delivery, update processing and effect recovery |
+
+This is a valid single-package layout, but the service and Telegram adapter currently share state and call each other. Moving these files into subdirectories would create new package boundaries and require dependency changes. Further growth should extract cohesive, independently testable capabilities into `internal/` incrementally, beginning with Session conversion or storage; preserve writer fencing and recovery tests when doing so. See the [Go module layout guide](https://go.dev/doc/modules/layout). No package refactor is part of the current delivery cleanup.
+
 ## Startup
 
 ```powershell
