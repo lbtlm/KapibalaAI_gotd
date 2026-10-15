@@ -83,3 +83,28 @@ F3 的 generation 只能拒绝迟到 JSON，不能撤销浏览器已应用的 Se
 首次真实浏览器三条用例均为上述 Cookie 断言失败，未将未启动业务栈计作 red。修复后独立 runner 四条全部通过（3.8s）。局部 runner 位于 frontend/.local/playwright-auth.config.ts，仅移除 webServer 并选 auth-cookies；正式 Playwright testDir 自动包含新用例，CI 原配置继续跑业务栈与该独立夹具。测试在 finally 释放阻塞响应、关闭 HTTP 服务，Playwright 管理浏览器生命周期。
 
 原 MSW 交错用例调整为先发起 B/退出 Promise，再释放挂起 A 响应，保留原身份、错误、单飞次数和新 session 断言，符合新的 HTTP 顺序。定向 Vitest auth/WS/login 共 11 项通过（00:16，9.49s）；真实 Cookie 浏览器 4 项通过。pnpm typecheck 与 pnpm build 均通过，3254 modules、构建 7.69s；原有 AntD 大 chunk 警告未扩展本轮范围。范围内 git diff --check 通过。未重跑全部业务 Go/浏览器或真实 Telegram。稳定快照仍需主控提交、独立复查和最终组合验收。
+
+
+## F15 attempt1 revision1：U1–U3（2026-10-15）
+
+Iris · 前端工程师｜序列与重连；主控最终验收。范围为 frontend 与所属 TDD/reuse 文档；保留已批准 F2 视觉方向。已读取 interface-design、design-taste-frontend、TDD 及 tests/mocking 指引；沿用已批准 browser UI/HTTP/WS seams，没有内部模块 mock。先查询 CodeGraph；后续工具报告 auto-sync disabled（索引锁竞争），编辑以当前磁盘文件为准，没有重建索引。
+
+| 条目 | red 及最小修复 | green / 证据 |
+|---|---|---|
+| U1 延迟预检与确认快照 | `pnpm test -- src/pages/Sequences.test.tsx`，exit 1：vars、stepVars、sequence、group 四种变化均使旧响应重新出现“确认启动”。该命令的 `--` 导致运行全体 24 项，4 failed / 20 passed；后续改用精确 `pnpm exec vitest run`。请求携带 groupId/input/revision，同一快照用于预检及确认，编辑使旧响应失效；aria-busy 表示预检在途，使测试等待真实请求完成而非固定延迟。 | `pnpm exec vitest run src/pages/Sequences.test.tsx` exit 0，6 passed。原确认启动测试断言预检与启动发送相同 vars/stepVars/sequenceId。日志 `.local/repairs-20261015/iris/u1-red.log`、`u1-green.log`。 |
+| U2 服务器当前运行与结果保留 | `pnpm exec vitest run src/pages/Sequences.test.tsx -t R1` exit 1：R1 完成后实际 WS seam 发出 R2 通知，页面仍找不到 r2。原位改为服务器 activeSequenceRunId 优先，最后运行结果绑定所属群；R2 完成后保留 R2。 | 最终 `pnpm exec vitest run src/pages/Sequences.test.tsx src/api/realtime.test.ts` exit 0，8 passed（7 UI + 1 WS）。日志 `u2-red.log`、`u2-green.log`、`final-unit.log`。 |
+| U3 实际栈断线三秒证据 | 本条是证据缺口；新增真实栈测试首跑通过，未伪造生产故障 red，未改动 RealtimeClient。复用现有 Playwright/C3 HTTP 准备流程；routeWebSocket 只转发真实后端帧并强制关闭/阻断 WS，HTTP、PG、fake gateway 均是真实栈。断线窗口注入三条 fake 消息，通过公开 HTTP 确认持久化且页面尚未显示，再恢复实际 WS。 | 首跑 `pnpm exec playwright test e2e/platform.spec.ts --grep B4` exit 0，1 passed；恢复网络到全部可见 198.21 ms、认证后 133.41 ms。定向组合 `pnpm exec playwright test e2e/platform.spec.ts` exit 0，3 passed（C3、viewer、B4）；B4 恢复网络到全部可见 103.42 ms、认证后 55.97 ms，唯一 seq 19/20/21，三条各一行；第二次真实重连 sinceSeq=21，仍各一行且没有额外消息帧。严格 3000 ms，无虚拟计时或放宽阈值。日志 `u3-first.log`、`platform-green.log`；结构化证据 `u3-first-b4.json`、`platform-green-b4.json`。 |
+
+最终 `pnpm typecheck` exit 0；`pnpm build` exit 0（含 tsc，3254 modules，7.11 s）；原有 AntD >500 kB chunk 提示仍在，不扩展本轮范围。日志 `typecheck.log`、`final-build.log`。最后仅增加 aria-busy 后重跑受影响 8 项与 build；不重复未受影响业务浏览器/后端整套测试。主控负责最终 CI 与组合验收。
+
+隔离环境为主控创建的 `kapibala_e2e_today` / PostgreSQL 127.0.0.1:55433；backend/gateway/agent 18080/18081/18082，Vite 15173，Edge headless。Playwright webServer 现在使用 E2E_BASE_URL 的端口，避免 baseURL 指向隔离端口却静默复用 5173。实际启动 `E2E_DATABASE_URL=指定隔离DSN BACKEND_PORT=18080 GATEWAY_PORT=18081 AGENT_PORT=18082 node scripts/fake-stack.mjs`；浏览器环境 `E2E_API_URL=http://127.0.0.1:18080 E2E_GATEWAY_URL=http://127.0.0.1:18081 E2E_BASE_URL=http://127.0.0.1:15173 VITE_BACKEND_URL=http://127.0.0.1:18080 E2E_BROWSER_CHANNEL=msedge`。仅测试 fake 账号/消息，无真实 Telegram/LLM。用户 Docker demo 5173 未使用或改动。
+
+自有 stack node PID 48780，服务 PID 35704/9564/45648；测试完成核对路径为 `.local/fake-stack/18080-18081-18082/bin/` 后全部清理，Playwright 自有 Vite 已退出。进程记录 `processes.json`、`cleanup.txt`；15173/18080/18081/18082 无剩余监听。首次 sandbox `pnpm` EPERM 属于环境限制，必要 escalated 后运行，不计行为 red。证据均在忽略目录 `.local/repairs-20261015/iris/`。本次无分支切换、commit/push、根脚本修改或发布；SUBMITTED 待主控验收。
+
+## F15 attempt2 revision2：CI 序列状态测试超时（2026-10-15）
+
+PR #3 CI `38673104348` frontend 首轮 24 passed / 1 failed；R1→WS R2 用例耗时 5810 ms，超过默认 5000 ms。失败是测试总时限，不是生产状态断言；原日志 `.local/repairs-20261015/ci-frontend-first.log`。冻结期间仅在 `.local/repairs-20261015/iris/a2/` 用副本分段调查：原配置聚焦原测试 2999 ms；带观测的副本 3065 ms，其中建立 R1 的 AntD role 查询和两次 userEvent 交互累计至 2566 ms，后续 WS 状态段约 0.5 s；未观察到等待一秒生产轮询。只替换 click 未改善（3280 ms），精确标签查询并保留 userEvent 为 2287 ms，标签查询配合直接 click 的候选为 1865 ms。分段、候选与限制见该目录 `findings.md` 及相应日志；本地计时不能冒充远端 CI 已通过。
+
+主控在固定 `3c5192b` 独立复核完成后解除指定测试/TDD 冻结。仅该状态测试建立 R1 的两次按钮操作改为已有 aria-label 查询、明确等待预检按钮 enabled，并用 fireEvent.click；确认按钮仍断言 enabled。真实 UI→HTTP 启动与本地 runId、全部 WS 帧、R1/R2 完成和保留断言均保留。复用现有 fireEvent/waitFor，无新增模块或依赖；替换旧两次完整 pointer/focus 设置流程。独立预检确认测试继续使用 userEvent。未提高测试 timeout、未修改生产逻辑或 B4 三秒阈值，也未制造生产 red。
+
+原配置验证：`pnpm exec vitest run src/pages/Sequences.test.tsx -t R1 --reporter verbose` exit 0，1 passed，1941 ms（`a2/r2-focused.log`）；`pnpm exec vitest run src/pages/Sequences.test.tsx src/api/realtime.test.ts` exit 0，8 passed，该状态用例 1700 ms（`a2/r2-affected.log`）；`pnpm typecheck` exit 0（`a2/r2-typecheck.log`）。日志均位于 `.local/repairs-20261015/iris/`。仅测试和文档改变，按授权不重复生产 build 或 B4/完整套件。远端 CI 与最终验收由主控完成；本次提交为 SUBMITTED。

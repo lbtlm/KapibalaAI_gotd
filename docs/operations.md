@@ -6,11 +6,23 @@ Compose 的数据库健康依赖与迁移完成依赖按 [Docker 启动顺序规
 
 ## CI and artifacts
 
-`.github/workflows/ci.yml` 在面向 dev/main 的 PR、dev/main push、手动启动时运行。无路径过滤：文档和 CI 变更仍经过仓库门禁。`policy` 验证工作分支目标、PR 标题和非 merge commit 格式；main 只接受本仓库 dev 的推广 PR。Go 作业明确提供真实 PostgreSQL DSN，并在另一数据库 `kapibala_gateway_integration` 启动生产 fake gateway，通过 `GATEWAY_INTEGRATION_URL` 运行实际群生命周期组合测试；gateway writer lease 测试使用 `kapibala_test`，互不争夺同库 writer。作业执行单元/集成、race、vet，并回收自有 gateway PID。前端作业执行 unit/type/build。E2E 使用独立 PostgreSQL、真实 backend、fake gateway、scripted provider 和 Vite。
+`.github/workflows/ci.yml` 在面向 dev/main 的 PR 和显式手动启动时运行，始终保留 `policy` 和固定 required check `CI Gate`。普通 dev/main push 不重复触发 CI。`policy` 验证工作分支目标、PR 标题、非 merge commit 格式，并运行交付脚本测试；main 只接受本仓库 dev 的发布 PR。
 
-固定 `CI Gate` 使用 `always()` 执行，检查 policy/go/frontend/e2e/artifact 全部 result=success。failure/cancelled/skipped/缺失均阻塞。workflow 整体取消不能生成成功 gate，应保持 required check 未通过。GitHub 对 needs result 和条件语法的规则见 [Contexts](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts) 和 [Workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)。
+| Profile | 选择条件 | 执行内容 |
+| --- | --- | --- |
+| docs | 合法 PR → dev，且全部变更命中明确文档路径 | policy/脚本测试、Gate |
+| light | 合法工作分支 PR → dev 的其他变更 | policy、`backend/internal/domain` 纯 Go unit、前端 unit/typecheck、Gate |
+| full | 同仓 dev → main 发布 PR（包括纯文档），或手动选择 `profile=full` | 原有 PostgreSQL/Go/race/vet、前端 unit/type/build、真实 fake 栈 E2E、镜像构建/冒烟/原制品打包、Gate |
 
-前置检查全部成功才构建 Docker 镜像。产物作业通过 `compose.ci.yaml` 在专用 `kapibala-ci-<run_id>-<run_attempt>` 项目启动同批镜像，验证 backend/gateway/provider 健康、前端 root/JS 资源与 HttpOnly refresh cookie 登录 API，然后回收该项目。仅这个 disposable CI 项目执行 `down --volumes --remove-orphans`；该规则不适用于演示或真实数据库。任何启动/冒烟/清理失败均阻止打包。交付包 `candidate-<github.sha>-<run_attempt>` 包含：
+light 不启动 PostgreSQL、gateway 服务或 Docker，不运行 race、E2E、`pnpm build` 或独立构建命令，也不生成候选；domain 测试不代表 gateway、PG 或恢复链路已通过。前端 unit/typecheck 作业被 light/full 复用，仅 full 执行 build。手动 full 为可选重验，发布 PR 已产出的原候选可直接用于后述准备流程，无需再完整跑一次。
+
+文档路径仅包括根 `README.md`、`CONTRIBUTING.md`、`AGENTS.md`、`CHANGELOG.md` 和 `docs/` 下 `.md`、`.rst`、`.txt`。PR 使用 base/head 的 merge-base 差异并关闭 rename detection，移动代码到文档仍包含原代码删除路径。空差异或 Git diff 暂不可用时至少执行 light；缺少来源/目标/仓库/SHA 元数据或非法分支则 policy 失败，不能落入 docs。普通文档提交不使用 `[skip ci]`；分支保护保持生效。
+
+full 模式的 Go 作业明确提供真实 PostgreSQL DSN，并在另一数据库 `kapibala_gateway_integration` 启动生产 fake gateway，通过 `GATEWAY_INTEGRATION_URL` 运行实际群生命周期组合测试；gateway writer lease 测试使用 `kapibala_test`，互不争夺同库 writer。作业执行单元/集成、race、vet，并回收自有 gateway PID。前端作业执行 unit/type/build。E2E 使用独立 PostgreSQL、真实 backend、fake gateway、scripted provider 和 Vite。
+
+固定 `CI Gate` 使用 `always()` 执行，要求 policy 成功且输出明确档位；docs 要求五个测试/制品作业全部 skipped，light 要求 go_light/frontend success 且 go/e2e/artifact skipped，full 要求 go/frontend/e2e/artifact success 且 go_light skipped。每个预期结果必须精确匹配；失败、取消、缺失、未知档位或其他组合继续阻塞。workflow 整体取消不能生成成功 gate，应保持 required check 未通过。档位输出及作业条件按 GitHub 的 [job outputs](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/pass-job-outputs) 和 [job conditions](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions) 传递；Gate 仍检查 [needs results](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts)。
+
+full 前置检查全部成功才构建 Docker 镜像。产物作业通过 `compose.ci.yaml` 在专用 `kapibala-ci-<run_id>-<run_attempt>` 项目启动同批镜像，验证 backend/gateway/provider 健康、前端 root/JS 资源、HttpOnly refresh cookie 登录，以及同源 WebSocket 101/有效 token 认证、无效 token 拒绝与跨源 403，然后回收该项目。Nginx `/ws` 转发原始 Host（含端口），保留后端同源和鉴权检查。仅这个 disposable CI 项目执行 `down --volumes --remove-orphans`；该规则不适用于演示或真实数据库。任何启动/冒烟/清理失败均阻止打包。交付包 `candidate-<github.sha>-<run_attempt>` 包含：
 
 - `images.tar.gz`：backend（含 migrate/provider）、gateway、frontend 三个 SHA 标签镜像。
 - `compose.yaml`：启动/迁移规则。
@@ -21,7 +33,9 @@ Compose 的数据库健康依赖与迁移完成依赖按 [Docker 启动顺序规
 
 ## Manual promotion
 
-维护者应先在相同 candidate SHA 上完成必需功能验收，然后在默认分支的 `Prepare accepted candidate` workflow 提供：成功的 CI **push** run ID（dev/main）、明确验收的完整 SHA、deploy 或 rollback purpose。该 workflow 检查 run 的来源、分支、状态和 SHA，下载同 run/attempt 的原候选，验证 SHA256，再交付 `accepted-<sha>-<purpose>-<run_id>`。它不会 build、tag、release、部署、改可见性。首次启用 workflow_dispatch 需该文件存在于 GitHub 默认分支。
+维护者应先在相同 candidate SHA 上完成必需功能验收，然后在默认分支的 `Prepare accepted candidate` workflow 提供：成功的同仓 dev → main **发布 PR CI run ID**、原 artifact 中 `COMMIT_SHA` 指定的完整 merge-test SHA（不是 dev HEAD）、deploy 或 rollback purpose。流程核验 run 来源/状态/仓库、该 run 记录的 PR main/dev 分支与仓库 ID、merge commit 两个父提交对应的 base/head，以及 merge tree 等于被测 dev source tree；任一元数据缺失或 tree 不一致时拒绝，需维护者先核清差异。随后按接受的 merge SHA 和原 run_attempt 下载原 artifact，验证 checksum/COMMIT_SHA，记录 tree，再交付 `accepted-<sha>-<purpose>-<run_id>`，不会为了准备包再完整跑一次 CI。
+
+历史成功 dev/main push 候选仍可用于回滚；可选手动 full 在 dev/main 生成的候选也兼容，且接受 SHA 必须等于该 run.head_sha。普通工作 PR → dev 的 light/docs run 没有候选，不能用于准备制品。该 workflow 不会 build、tag、release、部署或改可见性；首次启用 workflow_dispatch 需文件存在于 GitHub 默认分支。PR merge-test SHA 与后续正式合并 SHA应分别记录，不能把 tree 对应关系说成提交 SHA 相同。
 
 操作者只从可信仓库成功 run 下载已验收包，解压到单独目录；SHA256 验证完整性，不替代来源可信性或功能验收。部署脚本不会自动下载候选，不读取账户私有文件。使用专用 Compose project 名，避免接触其他项目；首次启动前在运行机确认端口/项目范围。
 
@@ -34,7 +48,7 @@ $env:CONSOLE_PORT='15173'
 node scripts/deploy.mjs .local/candidates/<accepted-sha> kapibala-candidate deploy
 ```
 
-脚本先验证每个文件 checksum 和 40 字符 SHA，加载原镜像，停止该专用项目的旧 backend/provider/gateway，`--no-build` 启动 PostgreSQL、执行显式迁移并启动服务，随后检查通过控制台代理的 `/api/health`。此手动流程有停机窗口；迁移前需完成下述备份。仅健康后将 SHA/mode/time 写入忽略的 `.local/deploy/<project>.json`。健康检查证明进程/代理可用，登录、业务、真实服务仍需对应功能验收。失败保留数据库和现场，操作者查看该 project 日志；没有暗中 reset 或删卷。
+脚本先验证每个文件 checksum 和 40 字符 SHA，加载原镜像，并确认 backend/gateway/frontend 三个预期 SHA 镜像均存在后，才停止该专用项目的旧 backend/provider/gateway。`up` 保留 `--no-build`；显式迁移使用 [`docker compose run --rm --pull never migrate`](https://docs.docker.com/reference/cli/docker/compose/run/)，该子命令不支持 `--no-build`。脚本复用已加载镜像，不执行 build 或 pull，再启动服务并检查通过控制台代理的 `/api/health`。此手动流程有停机窗口；迁移前需完成下述备份。仅健康后将 SHA/mode/time 写入忽略的 `.local/deploy/<project>.json`。健康检查证明进程/代理可用，登录、业务、真实服务仍需对应功能验收。失败保留数据库和现场，操作者查看该 project 日志；没有暗中 reset 或删卷。
 
 ## Rollback and stop
 

@@ -26,6 +26,25 @@ func (s *Service) terminal(aid, status string) {
 		}
 	}
 }
+
+// accountFailure applies only explicit permanent platform failures at result boundaries.
+func (s *Service) accountFailure(aid string, err error) error {
+	if err == nil {
+		return nil
+	}
+	api := platformError(err)
+	status := ""
+	switch api.Code {
+	case "ACCOUNT_SUSPENDED":
+		status = "suspended"
+	case "SESSION_EXPIRED":
+		status = "session_expired"
+	}
+	if acct := s.state.Accounts[aid]; status != "" && acct != nil && acct.Status != status {
+		s.terminal(aid, status)
+	}
+	return api
+}
 func (s *Service) runJobs() {
 	defer s.wg.Done()
 	ticker := time.NewTicker(10 * time.Millisecond)

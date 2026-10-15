@@ -38,11 +38,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       if (result.error || result.status !== 0) throw new Error('Docker operation failed; candidate was not accepted as healthy');
     };
     docker(['load','--input',path.join(directory,'images.tar.gz')]);
+    // Refuse missing original images before stopping a working application.
+    docker(['image','inspect','--format','{{.Id}}',...['backend','gateway','frontend'].map(component=>`kapibala-${component}:${sha}`)]);
     const compose = ['compose','-f',path.join(directory,'compose.yaml'),'-p',project];
     if (mode === 'deploy') {
       docker([...compose,'stop','backend','agent','gateway']);
       docker([...compose,'up','-d','--no-build','postgres']);
-      docker([...compose,'run','--rm','--no-build','migrate']);
+      docker([...compose,'run','--rm','--pull','never','migrate']);
     }
     docker([...compose,'up','-d','--no-build','--no-deps','postgres','gateway','agent','backend','frontend']);
     const url = `http://127.0.0.1:${env.CONSOLE_PORT || '5173'}/api/health`;

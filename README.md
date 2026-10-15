@@ -106,6 +106,8 @@ pnpm --dir frontend test:e2e
 
 需求、真实验收与限制见 [验收矩阵](docs/验收矩阵.md)，协作状态见 [development-status.md](docs/development-status.md)，各组件 TDD/reuse 文档见 `docs/tdd-*.md`、`docs/reuse-*.md`。可选 C2 provider 接入和 C3 浏览器测试已提供；C1 媒体持久化不在当前核心范围，gateway 媒体端点返回 404。真实 Telegram 的服务器原时间戳为秒，模拟契约为毫秒。真实平台无法保证网关规范中的两秒故障收敛，未知外部效果会保持待核实而不盲目重复。
 
-开发分支全部 PR 到 `dev`，验收后单独 `dev` → `main`；固定 required check 为 `CI Gate`。流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。CI 构建绑定 SHA 的镜像，在专用 Compose 项目中验证三个服务健康、前端页面/资源和登录，再打包镜像与 SHA256 清单；受控手动流程复用同一产物。尚未宣称生产部署、Release 或标签发布。
+开发分支全部 PR 到 `dev`，执行 **light**：策略/脚本测试、Go domain 纯单元测试、前端 unit/typecheck，不做前端构建、PG/race、E2E 或镜像构建；明确纯文档 PR 使用 **docs**，仅策略/脚本测试与 Gate。验收后的同仓 `dev` → `main` 发布 PR 执行 **full**，包括 Go/PostgreSQL/race/vet、前端 build、真实 fake 栈 E2E、同批镜像冒烟与 SHA256 原制品。普通 dev/main push 不重复跑 CI；显式手动 full 为可选重验。
+
+固定 required check 仍为 `CI Gate`，只接受所选档位的精确成功/跳过组合，普通文档提交无需 `[skip ci]`。轻量通过不代表 gateway/PG/恢复或完整构建验收通过。发布 PR 的原 artifact 可直接用于受控准备流程，绑定其实际 merge-test SHA、父提交与被测 source tree，无需为准备包再跑一次 full；历史 push 候选仍可回滚。分支流程见 [CONTRIBUTING.md](CONTRIBUTING.md)，档位与制品规则见 [运维说明](docs/operations.md)。尚未宣称生产部署、Release 或标签发布。
 
 PR #1 已合入 `dev`。合并后的需求查漏、已定位的边界问题及 10 月 15 日白天优先级见 [2026-10-15 白天工作计划](docs/upgrade-plan-2026-10-15.md)；既有 CI 通过不代表新发现的场景已经验证。

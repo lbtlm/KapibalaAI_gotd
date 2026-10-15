@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lbtlm/KapibalaAI_gotd/backend/internal/migration"
 	"net/http"
@@ -45,6 +46,10 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return nil, e
 	}
 	pc.MaxConns = 32
+	pc.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		conn.TypeMap().RegisterType(&pgtype.Type{Name: "timestamptz", OID: pgtype.TimestamptzOID, Codec: &pgtype.TimestamptzCodec{ScanLocation: time.UTC}})
+		return nil
+	}
 	p, e := pgxpool.NewWithConfig(ctx, pc)
 	if e != nil {
 		return nil, e
